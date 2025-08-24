@@ -10,7 +10,14 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from nano_graphrag.llm.base import BaseLLMProvider
+from nano_graphrag.llm.base import (
+    BaseLLMProvider,
+    BaseEmbeddingProvider,
+    CompletionParams,
+    CompletionResponse,
+    StreamChunk,
+    EmbeddingResponse
+)
 from nano_graphrag.llm.providers.openai import OpenAIProvider, OpenAIEmbeddingProvider
 
 
