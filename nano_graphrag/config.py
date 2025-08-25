@@ -263,4 +263,16 @@ class GraphRAGConfig:
             'cheap_model_max_token_size': self.llm.max_tokens,
             'cheap_model_max_async': self.llm.max_concurrent,
             'enable_llm_cache': self.llm.cache_enabled,
+            # Additional fields required by legacy functions
+            'node_embedding_algorithm': 'node2vec',
+            'node2vec_params': {
+                'dimensions': self.embedding.dimension,
+                'num_walks': 10,
+                'walk_length': 40,
+                'window_size': 2,
+                'iterations': 3,
+                'random_seed': 3,
+            },
+            'always_create_working_dir': True,
+            'addon_params': {},
         }

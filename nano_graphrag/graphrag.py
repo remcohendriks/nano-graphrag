@@ -253,13 +253,11 @@ class GraphRAG:
             
             # Store chunks in vector DB if naive RAG is enabled
             if self.config.query.enable_naive_rag and self.chunks_vdb:
-                chunk_contents = [c["content"] for c in chunks]
-                chunk_ids = [compute_mdhash_id(c, prefix="chunk-") for c in chunk_contents]
-                await self.chunks_vdb.upsert(
-                    ids=chunk_ids,
-                    documents=chunk_contents,
-                    metadatas=[{"doc_id": doc_id} for _ in chunks]
-                )
+                chunk_dict = {}
+                for chunk in chunks:
+                    chunk_id = compute_mdhash_id(chunk["content"], prefix="chunk-")
+                    chunk_dict[chunk_id] = chunk["content"]
+                await self.chunks_vdb.upsert(chunk_dict)
         
         # Generate community reports if local query is enabled
         if self.config.query.enable_local:
@@ -270,26 +268,23 @@ class GraphRAG:
     
     async def _generate_community_reports(self):
         """Generate community reports for graph clusters."""
-        # Get graph clusters using community schema
-        try:
-            communities = await self.chunk_entity_relation_graph.community_schema()
-        except AttributeError:
-            # Fallback if community_schema not available
-            logger.warning("Graph storage doesn't support community_schema, skipping reports")
-            return
+        # First run clustering algorithm
+        await self.chunk_entity_relation_graph.clustering(
+            algorithm=self.config.graph_clustering.algorithm
+        )
         
-        # Generate report for each community
-        for community_id, node_ids in communities.items():
-            if node_ids:  # Only process non-empty communities
-                report = await summarize_community(
-                    node_ids,
-                    self.chunk_entity_relation_graph,
-                    self.best_model_func,
-                    self.config.llm.max_tokens,
-                    self.convert_response_to_json_func,
-                    self.tokenizer_wrapper
-                )
-                await self.community_reports.upsert({f"community-{community_id}": report})
+        # Use the original generate_community_report function for proper format
+        global_config = self.config.to_dict()
+        global_config["best_model_func"] = self.best_model_func
+        global_config["convert_response_to_json_func"] = self.convert_response_to_json_func
+        global_config["special_community_report_llm_kwargs"] = {"response_format": {"type": "json_object"}}
+        
+        await generate_community_report(
+            self.community_reports,
+            self.chunk_entity_relation_graph,
+            self.tokenizer_wrapper,
+            global_config
+        )
         
         # Update entities vector DB with embeddings
         if self.entities_vdb:
@@ -320,18 +315,19 @@ class GraphRAG:
                 self.community_reports,
                 self.text_chunks,
                 param,
-                self.best_model_func,
-                self.config.llm.max_tokens,
-                self.config.query.similarity_threshold,
-                self.convert_response_to_json_func
+                self.tokenizer_wrapper,
+                self.config.to_dict()  # Pass full global_config
             )
         elif param.mode == "global":
             return await global_query(
                 query,
+                self.chunk_entity_relation_graph,
+                self.entities_vdb,
                 self.community_reports,
-                self.best_model_func,
-                self.config.llm.max_tokens,
-                self.convert_response_to_json_func
+                self.text_chunks,
+                param,
+                self.tokenizer_wrapper,
+                self.config.to_dict()  # Pass full global_config
             )
         elif param.mode == "naive":
             return await naive_query(
@@ -339,8 +335,8 @@ class GraphRAG:
                 self.chunks_vdb,
                 self.text_chunks,
                 param,
-                self.best_model_func,
-                self.config.llm.max_tokens
+                self.tokenizer_wrapper,
+                self.config.to_dict()  # Pass full global_config
             )
         else:
             raise ValueError(f"Unknown query mode: {param.mode}")

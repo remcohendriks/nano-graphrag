@@ -347,3 +347,17 @@ To refactor from modified to clean version:
 4. Separate API layer from core logic
 5. Add comprehensive configuration management
 6. Implement proper dependency injection
+
+### When updating infrastructure:
+- Test load balancing with multiple backend instances
+- Ensure environment variables are properly set
+- Verify SSL certificates are correctly mounted
+- Check Docker network connectivity between services
+- ive added a dir ./llm/nano-graphrag/tickets - which is going to serve as project tickets store. inside, markdown documents reside, each detailing a JIRA-style ticket resembling a development/code change into the project. except for user story and detailed code change proposal, it should also include feature branch name, and details what the pull request should contain/
+- all the jira-style tickets you are to make, are aimed for claude code to implement. hence, you can detail it such for claude code easy to understand. you can leave out strict details like story points, implementation time paths, you can just stick to the technicalities.
+- with defining jira tickets, add definitions-of-done, which should be unit tests with pytorch, unless other suggested or specified by the user.
+- aim for least complexity and good user-readability. the repository contains novel techniques with complex programming. ensure python typings are in order. add comments conservatively, mainly to explain function uses and hard-to-understand complex items. do NOT use comments to denote changes from the past. do NOT use comments where typings suffice.
+- in unit testing llm-depdendent programming, you are allowed to use an openai mini model for testing, where applicable
+- the openai models available are gpt-5 and gpt-5-mini
+- use context7 mcp copiously to inform yourself about the latest package definitions and api's
+- for tests, put testing files in a `tests` folder adjacent to the file to be tested
