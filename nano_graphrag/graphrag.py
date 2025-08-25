@@ -245,18 +245,51 @@ class GraphRAG:
                     self.convert_response_to_json_func
                 )
                 
-                # Store entities in graph
+                # Store entities in graph using batch upsert with proper shapes
                 if entities["nodes"]:
-                    await self.chunk_entity_relation_graph.upsert_nodes(entities["nodes"])
+                    node_items = [
+                        (
+                            node["id"],
+                            {
+                                "entity_type": node.get("type", "UNKNOWN").upper(),
+                                "description": node.get("description", ""),
+                                "source_id": doc_id,
+                                "name": node.get("name", node["id"]),
+                            },
+                        )
+                        for node in entities["nodes"]
+                    ]
+                    await self.chunk_entity_relation_graph.upsert_nodes_batch(node_items)
+                
                 if entities["edges"]:
-                    await self.chunk_entity_relation_graph.upsert_edges(entities["edges"])
+                    edge_items = []
+                    for edge in entities["edges"]:
+                        src = edge.get("source") or edge.get("from")
+                        tgt = edge.get("target") or edge.get("to")
+                        if src and tgt:
+                            edge_items.append(
+                                (
+                                    src,
+                                    tgt,
+                                    {
+                                        "weight": 1.0,
+                                        "description": edge.get("description", ""),
+                                        "source_id": doc_id,
+                                    },
+                                )
+                            )
+                    if edge_items:
+                        await self.chunk_entity_relation_graph.upsert_edges_batch(edge_items)
             
             # Store chunks in vector DB if naive RAG is enabled
             if self.config.query.enable_naive_rag and self.chunks_vdb:
                 chunk_dict = {}
                 for chunk in chunks:
                     chunk_id = compute_mdhash_id(chunk["content"], prefix="chunk-")
-                    chunk_dict[chunk_id] = chunk["content"]
+                    chunk_dict[chunk_id] = {
+                        "content": chunk["content"],
+                        "doc_id": doc_id,
+                    }
                 await self.chunks_vdb.upsert(chunk_dict)
         
         # Generate community reports if local query is enabled
@@ -287,16 +320,24 @@ class GraphRAG:
         )
         
         # Update entities vector DB with embeddings
-        if self.entities_vdb:
-            all_entities = await self.chunk_entity_relation_graph.get_all_nodes()
-            entity_texts = [e["description"] for e in all_entities]
-            entity_ids = [e["id"] for e in all_entities]
+        if self.entities_vdb and self.config.query.enable_local:
+            # Get node degree for all nodes
+            node_degrees = await self.chunk_entity_relation_graph.get_node_degree()
             
-            await self.entities_vdb.upsert(
-                ids=entity_ids,
-                documents=entity_texts,
-                metadatas=[{"entity_name": e["name"]} for e in all_entities]
-            )
+            # Build entity dict with proper format
+            entity_dict = {}
+            for node_id, degree in node_degrees.items():
+                # Get full node data
+                node_data = await self.chunk_entity_relation_graph.get_node(node_id)
+                if node_data:
+                    entity_dict[node_id] = {
+                        "content": node_data.get("description", ""),
+                        "entity_name": node_data.get("name", node_id),
+                        "entity_type": node_data.get("entity_type", "UNKNOWN"),
+                    }
+            
+            if entity_dict:
+                await self.entities_vdb.upsert(entity_dict)
     
     async def aquery(self, query: str, param: QueryParam = QueryParam()):
         """Query asynchronously."""

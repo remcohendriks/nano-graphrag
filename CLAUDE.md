@@ -349,10 +349,6 @@ To refactor from modified to clean version:
 6. Implement proper dependency injection
 
 ### When updating infrastructure:
-- Test load balancing with multiple backend instances
-- Ensure environment variables are properly set
-- Verify SSL certificates are correctly mounted
-- Check Docker network connectivity between services
 - ive added a dir ./llm/nano-graphrag/tickets - which is going to serve as project tickets store. inside, markdown documents reside, each detailing a JIRA-style ticket resembling a development/code change into the project. except for user story and detailed code change proposal, it should also include feature branch name, and details what the pull request should contain/
 - all the jira-style tickets you are to make, are aimed for claude code to implement. hence, you can detail it such for claude code easy to understand. you can leave out strict details like story points, implementation time paths, you can just stick to the technicalities.
 - with defining jira tickets, add definitions-of-done, which should be unit tests with pytorch, unless other suggested or specified by the user.

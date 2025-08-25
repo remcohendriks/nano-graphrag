@@ -1225,7 +1225,7 @@ async def extract_entities_from_chunks(
             else:
                 context["input_text"] = response
                 response = await model_func(
-                    PROMPTS.get("entity_extraction_continuation", PROMPTS.get("entity_extraction", "")).format(**context)
+                    PROMPTS.get("entiti_continue_extraction", PROMPTS.get("entity_extraction", "")).format(**context)
                 )
             
             # Parse entities and relationships from response
