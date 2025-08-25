@@ -1,22 +1,12 @@
 import asyncio
 import os
-from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from functools import partial
-from typing import Callable, Dict, List, Optional, Type, Union, cast
+from pathlib import Path
+from typing import Dict, List, Optional, Union, cast
 
-
-
-from ._llm import (
-    amazon_bedrock_embedding,
-    create_amazon_bedrock_complete_function,
-    gpt_4o_complete,
-    gpt_4o_mini_complete,
-    openai_embedding,
-    azure_gpt_4o_complete,
-    azure_openai_embedding,
-    azure_gpt_4o_mini_complete,
-)
+from .config import GraphRAGConfig
+from .llm.providers import get_llm_provider, get_embedding_provider
 from ._op import (
     chunking_by_token_size,
     extract_entities,
@@ -44,339 +34,302 @@ from .base import (
     BaseGraphStorage,
     BaseKVStorage,
     BaseVectorStorage,
-    StorageNameSpace,
     QueryParam,
 )
 
 
-@dataclass
 class GraphRAG:
-    working_dir: str = field(
-        default_factory=lambda: f"./nano_graphrag_cache_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}"
-    )
-    # graph mode
-    enable_local: bool = True
-    enable_naive_rag: bool = False
-
-    # text chunking
-    tokenizer_type: str = "tiktoken"  # or 'huggingface'
-    tiktoken_model_name: str = "gpt-4o"
-    huggingface_model_name: str = "bert-base-uncased"  # default HF model
-    chunk_func: Callable[
-        [
-            list[list[int]],
-            List[str],
-            TokenizerWrapper,
-            Optional[int],
-            Optional[int],
-        ],
-        List[Dict[str, Union[str, int]]],
-    ] = chunking_by_token_size
-    chunk_token_size: int = 1200
-    chunk_overlap_token_size: int = 100
+    """GraphRAG with simplified configuration management."""
     
-
-    # entity extraction
-    entity_extract_max_gleaning: int = 1
-    entity_summary_to_max_tokens: int = 500
-
-    # graph clustering
-    graph_cluster_algorithm: str = "leiden"
-    max_graph_cluster_size: int = 10
-    graph_cluster_seed: int = 0xDEADBEEF
-
-    # node embedding
-    node_embedding_algorithm: str = "node2vec"
-    node2vec_params: dict = field(
-        default_factory=lambda: {
-            "dimensions": 1536,
-            "num_walks": 10,
-            "walk_length": 40,
-            "num_walks": 10,
-            "window_size": 2,
-            "iterations": 3,
-            "random_seed": 3,
-        }
-    )
-
-    # community reports
-    special_community_report_llm_kwargs: dict = field(
-        default_factory=lambda: {"response_format": {"type": "json_object"}}
-    )
-
-    # text embedding
-    embedding_func: EmbeddingFunc = field(default_factory=lambda: openai_embedding)
-    embedding_batch_num: int = 32
-    embedding_func_max_async: int = 16
-    query_better_than_threshold: float = 0.2
-
-    # LLM
-    using_azure_openai: bool = False
-    using_amazon_bedrock: bool = False
-    best_model_id: str = "us.anthropic.claude-3-sonnet-20240229-v1:0"
-    cheap_model_id: str = "us.anthropic.claude-3-haiku-20240307-v1:0"
-    best_model_func: callable = gpt_4o_complete
-    best_model_max_token_size: int = 32768
-    best_model_max_async: int = 16
-    cheap_model_func: callable = gpt_4o_mini_complete
-    cheap_model_max_token_size: int = 32768
-    cheap_model_max_async: int = 16
-
-    # entity extraction
-    entity_extraction_func: callable = extract_entities
-
-    # storage
-    key_string_value_json_storage_cls: Type[BaseKVStorage] = JsonKVStorage
-    vector_db_storage_cls: Type[BaseVectorStorage] = NanoVectorDBStorage
-    vector_db_storage_cls_kwargs: dict = field(default_factory=dict)
-    graph_storage_cls: Type[BaseGraphStorage] = NetworkXStorage
-    enable_llm_cache: bool = True
-
-    # extension
-    always_create_working_dir: bool = True
-    addon_params: dict = field(default_factory=dict)
-    convert_response_to_json_func: callable = convert_response_to_json
-
-    def __post_init__(self):
-        _print_config = ",\n  ".join([f"{k} = {v}" for k, v in asdict(self).items()])
-        logger.debug(f"GraphRAG init with param:\n\n  {_print_config}\n")
-
+    def __init__(self, config: Optional[GraphRAGConfig] = None):
+        """Initialize GraphRAG with configuration object.
+        
+        Args:
+            config: GraphRAGConfig object. If None, uses defaults.
+        """
+        self.config = config or GraphRAGConfig()
+        self._init_working_dir()
+        self._init_tokenizer()
+        self._init_providers()
+        self._init_storage()
+        self._init_functions()
+        
+        logger.info(f"GraphRAG initialized with config: {self.config}")
+    
+    def _init_working_dir(self):
+        """Initialize working directory."""
+        working_dir = Path(self.config.storage.working_dir)
+        if not working_dir.exists():
+            logger.info(f"Creating working directory {working_dir}")
+            working_dir.mkdir(parents=True, exist_ok=True)
+        self.working_dir = str(working_dir)
+    
+    def _init_tokenizer(self):
+        """Initialize tokenizer wrapper."""
         self.tokenizer_wrapper = TokenizerWrapper(
-            tokenizer_type=self.tokenizer_type,
-            model_name=self.tiktoken_model_name if self.tokenizer_type == "tiktoken" else self.huggingface_model_name
+            tokenizer_type=self.config.chunking.tokenizer,
+            model_name=self.config.chunking.tokenizer_model
         )
-
-        if self.using_azure_openai:
-            # If there's no OpenAI API key, use Azure OpenAI
-            if self.best_model_func == gpt_4o_complete:
-                self.best_model_func = azure_gpt_4o_complete
-            if self.cheap_model_func == gpt_4o_mini_complete:
-                self.cheap_model_func = azure_gpt_4o_mini_complete
-            if self.embedding_func == openai_embedding:
-                self.embedding_func = azure_openai_embedding
-            logger.info(
-                "Switched the default openai funcs to Azure OpenAI if you didn't set any of it"
-            )
-
-        if self.using_amazon_bedrock:
-            self.best_model_func = create_amazon_bedrock_complete_function(self.best_model_id)
-            self.cheap_model_func = create_amazon_bedrock_complete_function(self.cheap_model_id)
-            self.embedding_func = amazon_bedrock_embedding
-            logger.info(
-                "Switched the default openai funcs to Amazon Bedrock"
-            )
-
-        if not os.path.exists(self.working_dir) and self.always_create_working_dir:
-            logger.info(f"Creating working directory {self.working_dir}")
-            os.makedirs(self.working_dir)
-
-        self.full_docs = self.key_string_value_json_storage_cls(
-            namespace="full_docs", global_config=asdict(self)
+    
+    def _init_providers(self):
+        """Initialize LLM and embedding providers."""
+        # Get LLM provider
+        self.llm_provider = get_llm_provider(
+            provider_type=self.config.llm.provider,
+            model=self.config.llm.model,
+            config=self.config.llm
         )
-
-        self.text_chunks = self.key_string_value_json_storage_cls(
-            namespace="text_chunks", global_config=asdict(self)
+        
+        # Get embedding provider
+        self.embedding_provider = get_embedding_provider(
+            provider_type=self.config.embedding.provider,
+            model=self.config.embedding.model,
+            config=self.config.embedding
         )
-
+        
+        # Create function wrappers for compatibility
+        self.best_model_func = self.llm_provider.complete
+        self.cheap_model_func = self.llm_provider.complete  # Can use different model later
+        self.embedding_func = self.embedding_provider.embed
+    
+    def _init_storage(self):
+        """Initialize storage backends."""
+        # Get global config dict for storage classes
+        global_config = self.config.to_dict()
+        
+        # Initialize KV storage
+        self.full_docs = self._get_kv_storage("full_docs", global_config)
+        self.text_chunks = self._get_kv_storage("text_chunks", global_config)
+        self.community_reports = self._get_kv_storage("community_reports", global_config)
+        
+        # Initialize LLM cache if enabled
         self.llm_response_cache = (
-            self.key_string_value_json_storage_cls(
-                namespace="llm_response_cache", global_config=asdict(self)
-            )
-            if self.enable_llm_cache
+            self._get_kv_storage("llm_response_cache", global_config)
+            if self.config.llm.cache_enabled
             else None
         )
-
-        self.community_reports = self.key_string_value_json_storage_cls(
-            namespace="community_reports", global_config=asdict(self)
+        
+        # Initialize graph storage
+        self.chunk_entity_relation_graph = self._get_graph_storage(
+            "chunk_entity_relation", global_config
         )
-        self.chunk_entity_relation_graph = self.graph_storage_cls(
-            namespace="chunk_entity_relation", global_config=asdict(self)
+        
+        # Initialize vector storage
+        self.entities_vdb = (
+            self._get_vector_storage(
+                "entities", 
+                global_config,
+                meta_fields={"entity_name"}
+            )
+            if self.config.query.enable_local
+            else None
         )
-
-        self.embedding_func = limit_async_func_call(self.embedding_func_max_async)(
+        
+        self.chunks_vdb = (
+            self._get_vector_storage("chunks", global_config)
+            if self.config.query.enable_naive_rag
+            else None
+        )
+    
+    def _get_kv_storage(self, namespace: str, global_config: dict) -> BaseKVStorage:
+        """Get KV storage instance based on config."""
+        if self.config.storage.kv_backend == "json":
+            return JsonKVStorage(namespace=namespace, global_config=global_config)
+        else:
+            raise ValueError(f"Unknown KV backend: {self.config.storage.kv_backend}")
+    
+    def _get_graph_storage(self, namespace: str, global_config: dict) -> BaseGraphStorage:
+        """Get graph storage instance based on config."""
+        if self.config.storage.graph_backend == "networkx":
+            return NetworkXStorage(namespace=namespace, global_config=global_config)
+        else:
+            raise ValueError(f"Unknown graph backend: {self.config.storage.graph_backend}")
+    
+    def _get_vector_storage(
+        self, 
+        namespace: str, 
+        global_config: dict,
+        meta_fields: Optional[set] = None
+    ) -> BaseVectorStorage:
+        """Get vector storage instance based on config."""
+        kwargs = {
+            "namespace": namespace,
+            "global_config": global_config,
+            "embedding_func": self.embedding_func,
+        }
+        if meta_fields:
+            kwargs["meta_fields"] = meta_fields
+            
+        if self.config.storage.vector_backend == "nano":
+            return NanoVectorDBStorage(**kwargs)
+        elif self.config.storage.vector_backend == "hnswlib":
+            # Import dynamically to avoid dependency if not used
+            from ._storage import HNSWVectorStorage
+            return HNSWVectorStorage(**kwargs)
+        else:
+            raise ValueError(f"Unknown vector backend: {self.config.storage.vector_backend}")
+    
+    def _init_functions(self):
+        """Initialize rate-limited functions."""
+        # Apply rate limiting to embedding function
+        self.embedding_func = limit_async_func_call(self.config.embedding.max_concurrent)(
             self.embedding_func
         )
-        self.entities_vdb = (
-            self.vector_db_storage_cls(
-                namespace="entities",
-                global_config=asdict(self),
-                embedding_func=self.embedding_func,
-                meta_fields={"entity_name"},
-            )
-            if self.enable_local
-            else None
-        )
-        self.chunks_vdb = (
-            self.vector_db_storage_cls(
-                namespace="chunks",
-                global_config=asdict(self),
-                embedding_func=self.embedding_func,
-            )
-            if self.enable_naive_rag
-            else None
-        )
-
-        self.best_model_func = limit_async_func_call(self.best_model_max_async)(
+        
+        # Apply rate limiting and caching to model functions
+        self.best_model_func = limit_async_func_call(self.config.llm.max_concurrent)(
             partial(self.best_model_func, hashing_kv=self.llm_response_cache)
         )
-        self.cheap_model_func = limit_async_func_call(self.cheap_model_max_async)(
+        self.cheap_model_func = limit_async_func_call(self.config.llm.max_concurrent)(
             partial(self.cheap_model_func, hashing_kv=self.llm_response_cache)
         )
-
-
-
-    def insert(self, string_or_strings):
+        
+        # Set entity extraction function
+        self.entity_extraction_func = extract_entities
+        
+        # Set chunk function
+        self.chunk_func = chunking_by_token_size
+        
+        # Set conversion function
+        self.convert_response_to_json_func = convert_response_to_json
+    
+    def insert(self, string_or_strings: Union[str, List[str]]):
+        """Insert documents synchronously."""
         loop = always_get_an_event_loop()
         return loop.run_until_complete(self.ainsert(string_or_strings))
-
+    
     def query(self, query: str, param: QueryParam = QueryParam()):
+        """Query synchronously."""
         loop = always_get_an_event_loop()
         return loop.run_until_complete(self.aquery(query, param))
-
+    
+    async def ainsert(self, string_or_strings: Union[str, List[str]]):
+        """Insert documents asynchronously."""
+        if isinstance(string_or_strings, str):
+            string_or_strings = [string_or_strings]
+        
+        # Process each document
+        for doc_string in string_or_strings:
+            doc_id = compute_mdhash_id(doc_string, prefix="doc-")
+            logger.info(f"Inserting document {doc_id}")
+            
+            # Store full document
+            await self.full_docs.upsert({doc_id: {"content": doc_string}})
+            
+            # Chunk the document
+            chunks = await get_chunks(
+                doc_string,
+                self.tokenizer_wrapper,
+                self.chunk_func,
+                self.config.chunking.size,
+                self.config.chunking.overlap
+            )
+            
+            # Store chunks
+            for chunk in chunks:
+                chunk_id = compute_mdhash_id(chunk["content"], prefix="chunk-")
+                chunk["doc_id"] = doc_id
+                await self.text_chunks.upsert({chunk_id: chunk})
+                
+                # Extract entities if local query is enabled
+                if self.config.query.enable_local:
+                    entities = await self.entity_extraction_func(
+                        chunk["content"],
+                        self.cheap_model_func,
+                        self.tokenizer_wrapper,
+                        self.config.entity_extraction.max_gleaning,
+                        self.config.entity_extraction.summary_max_tokens,
+                        self.convert_response_to_json_func
+                    )
+                    
+                    # Store entities in graph
+                    await self.chunk_entity_relation_graph.upsert_nodes(entities["nodes"])
+                    await self.chunk_entity_relation_graph.upsert_edges(entities["edges"])
+            
+            # Store chunks in vector DB if naive RAG is enabled
+            if self.config.query.enable_naive_rag and self.chunks_vdb:
+                chunk_contents = [c["content"] for c in chunks]
+                chunk_ids = [compute_mdhash_id(c, prefix="chunk-") for c in chunk_contents]
+                await self.chunks_vdb.upsert(
+                    ids=chunk_ids,
+                    documents=chunk_contents,
+                    metadatas=[{"doc_id": doc_id} for _ in chunks]
+                )
+        
+        # Generate community reports if local query is enabled
+        if self.config.query.enable_local:
+            await self._generate_community_reports()
+    
+    async def _generate_community_reports(self):
+        """Generate community reports for graph clusters."""
+        # Get graph clusters
+        clusters = await self.chunk_entity_relation_graph.get_clusters(
+            algorithm=self.config.graph_clustering.algorithm,
+            max_size=self.config.graph_clustering.max_cluster_size,
+            seed=self.config.graph_clustering.seed
+        )
+        
+        # Generate report for each cluster
+        for cluster_id, cluster_nodes in clusters.items():
+            report = await generate_community_report(
+                cluster_nodes,
+                self.chunk_entity_relation_graph,
+                self.best_model_func,
+                self.config.llm.max_tokens,
+                self.convert_response_to_json_func
+            )
+            await self.community_reports.upsert({f"community-{cluster_id}": report})
+        
+        # Update entities vector DB with embeddings
+        if self.entities_vdb:
+            all_entities = await self.chunk_entity_relation_graph.get_all_nodes()
+            entity_texts = [e["description"] for e in all_entities]
+            entity_ids = [e["id"] for e in all_entities]
+            
+            await self.entities_vdb.upsert(
+                ids=entity_ids,
+                documents=entity_texts,
+                metadatas=[{"entity_name": e["name"]} for e in all_entities]
+            )
+    
     async def aquery(self, query: str, param: QueryParam = QueryParam()):
-        if param.mode == "local" and not self.enable_local:
-            raise ValueError("enable_local is False, cannot query in local mode")
-        if param.mode == "naive" and not self.enable_naive_rag:
-            raise ValueError("enable_naive_rag is False, cannot query in naive mode")
+        """Query asynchronously."""
+        # Validate query mode
+        if param.mode == "local" and not self.config.query.enable_local:
+            raise ValueError("Local query mode is disabled in config")
+        if param.mode == "naive" and not self.config.query.enable_naive_rag:
+            raise ValueError("Naive RAG mode is disabled in config")
+        
+        # Execute query based on mode
         if param.mode == "local":
-            response = await local_query(
+            return await local_query(
                 query,
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
                 self.community_reports,
                 self.text_chunks,
                 param,
-                self.tokenizer_wrapper,
-                asdict(self),
+                self.best_model_func,
+                self.config.llm.max_tokens,
+                self.config.query.similarity_threshold,
+                self.convert_response_to_json_func
             )
         elif param.mode == "global":
-            response = await global_query(
+            return await global_query(
                 query,
-                self.chunk_entity_relation_graph,
-                self.entities_vdb,
                 self.community_reports,
-                self.text_chunks,
-                param,
-                self.tokenizer_wrapper,
-                asdict(self),
+                self.best_model_func,
+                self.config.llm.max_tokens,
+                self.convert_response_to_json_func
             )
         elif param.mode == "naive":
-            response = await naive_query(
+            return await naive_query(
                 query,
                 self.chunks_vdb,
                 self.text_chunks,
                 param,
-                self.tokenizer_wrapper,
-                asdict(self),
+                self.best_model_func,
+                self.config.llm.max_tokens
             )
         else:
-            raise ValueError(f"Unknown mode {param.mode}")
-        await self._query_done()
-        return response
-
-    async def ainsert(self, string_or_strings):
-        await self._insert_start()
-        try:
-            if isinstance(string_or_strings, str):
-                string_or_strings = [string_or_strings]
-            # ---------- new docs
-            new_docs = {
-                compute_mdhash_id(c.strip(), prefix="doc-"): {"content": c.strip()}
-                for c in string_or_strings
-            }
-            _add_doc_keys = await self.full_docs.filter_keys(list(new_docs.keys()))
-            new_docs = {k: v for k, v in new_docs.items() if k in _add_doc_keys}
-            if not len(new_docs):
-                logger.warning(f"All docs are already in the storage")
-                return
-            logger.info(f"[New Docs] inserting {len(new_docs)} docs")
-
-            # ---------- chunking
-
-            inserting_chunks = get_chunks(
-                new_docs=new_docs,
-                chunk_func=self.chunk_func,
-                overlap_token_size=self.chunk_overlap_token_size,
-                max_token_size=self.chunk_token_size,
-                tokenizer_wrapper=self.tokenizer_wrapper,
-            )
-
-            _add_chunk_keys = await self.text_chunks.filter_keys(
-                list(inserting_chunks.keys())
-            )
-            inserting_chunks = {
-                k: v for k, v in inserting_chunks.items() if k in _add_chunk_keys
-            }
-            if not len(inserting_chunks):
-                logger.warning(f"All chunks are already in the storage")
-                return
-            logger.info(f"[New Chunks] inserting {len(inserting_chunks)} chunks")
-            if self.enable_naive_rag:
-                logger.info("Insert chunks for naive RAG")
-                await self.chunks_vdb.upsert(inserting_chunks)
-
-            # TODO: don't support incremental update for communities now, so we have to drop all
-            await self.community_reports.drop()
-
-            # ---------- extract/summary entity and upsert to graph
-            logger.info("[Entity Extraction]...")
-            maybe_new_kg = await self.entity_extraction_func(
-                inserting_chunks,
-                knwoledge_graph_inst=self.chunk_entity_relation_graph,
-                entity_vdb=self.entities_vdb,
-                tokenizer_wrapper=self.tokenizer_wrapper,
-                global_config=asdict(self),
-                using_amazon_bedrock=self.using_amazon_bedrock,
-            )
-            if maybe_new_kg is None:
-                logger.warning("No new entities found")
-                return
-            self.chunk_entity_relation_graph = maybe_new_kg
-            # ---------- update clusterings of graph
-            logger.info("[Community Report]...")
-            await self.chunk_entity_relation_graph.clustering(
-                self.graph_cluster_algorithm
-            )
-            await generate_community_report(
-                self.community_reports, self.chunk_entity_relation_graph, self.tokenizer_wrapper, asdict(self)
-            )
-
-            # ---------- commit upsertings and indexing
-            await self.full_docs.upsert(new_docs)
-            await self.text_chunks.upsert(inserting_chunks)
-        finally:
-            await self._insert_done()
-
-    async def _insert_start(self):
-        tasks = []
-        for storage_inst in [
-            self.chunk_entity_relation_graph,
-        ]:
-            if storage_inst is None:
-                continue
-            tasks.append(cast(StorageNameSpace, storage_inst).index_start_callback())
-        await asyncio.gather(*tasks)
-
-    async def _insert_done(self):
-        tasks = []
-        for storage_inst in [
-            self.full_docs,
-            self.text_chunks,
-            self.llm_response_cache,
-            self.community_reports,
-            self.entities_vdb,
-            self.chunks_vdb,
-            self.chunk_entity_relation_graph,
-        ]:
-            if storage_inst is None:
-                continue
-            tasks.append(cast(StorageNameSpace, storage_inst).index_done_callback())
-        await asyncio.gather(*tasks)
-
-    async def _query_done(self):
-        tasks = []
-        for storage_inst in [self.llm_response_cache]:
-            if storage_inst is None:
-                continue
-            tasks.append(cast(StorageNameSpace, storage_inst).index_done_callback())
-        await asyncio.gather(*tasks)
+            raise ValueError(f"Unknown query mode: {param.mode}")
