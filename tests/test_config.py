@@ -117,26 +117,26 @@ class TestStorageConfig:
         """Test creating from environment variables."""
         with patch.dict(os.environ, {
             "STORAGE_VECTOR_BACKEND": "hnswlib",
-            "STORAGE_GRAPH_BACKEND": "neo4j",
-            "STORAGE_KV_BACKEND": "redis",
+            "STORAGE_GRAPH_BACKEND": "networkx",
+            "STORAGE_KV_BACKEND": "json",
             "STORAGE_WORKING_DIR": "/tmp/test_cache"
         }):
             config = StorageConfig.from_env()
             assert config.vector_backend == "hnswlib"
-            assert config.graph_backend == "neo4j"
-            assert config.kv_backend == "redis"
+            assert config.graph_backend == "networkx"
+            assert config.kv_backend == "json"
             assert config.working_dir == "/tmp/test_cache"
     
     def test_validation(self):
         """Test validation errors."""
         with pytest.raises(ValueError, match="Unknown vector backend"):
-            StorageConfig(vector_backend="invalid")
+            StorageConfig(vector_backend="milvus")
         
         with pytest.raises(ValueError, match="Unknown graph backend"):
-            StorageConfig(graph_backend="invalid")
+            StorageConfig(graph_backend="neo4j")
         
         with pytest.raises(ValueError, match="Unknown KV backend"):
-            StorageConfig(kv_backend="invalid")
+            StorageConfig(kv_backend="redis")
 
 
 class TestChunkingConfig:
@@ -320,11 +320,11 @@ class TestGraphRAGConfig:
         """Test creating with custom sub-configs."""
         config = GraphRAGConfig(
             llm=LLMConfig(provider="deepseek"),
-            storage=StorageConfig(vector_backend="milvus"),
+            storage=StorageConfig(vector_backend="hnswlib"),
             chunking=ChunkingConfig(size=2000)
         )
         assert config.llm.provider == "deepseek"
-        assert config.storage.vector_backend == "milvus"
+        assert config.storage.vector_backend == "hnswlib"
         assert config.chunking.size == 2000
     
     def test_immutable(self):

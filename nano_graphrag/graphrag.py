@@ -12,6 +12,9 @@ from ._op import (
     extract_entities,
     generate_community_report,
     get_chunks,
+    get_chunks_v2,
+    extract_entities_from_chunks,
+    summarize_community,
     local_query,
     global_query,
     naive_query,
@@ -217,7 +220,7 @@ class GraphRAG:
             await self.full_docs.upsert({doc_id: {"content": doc_string}})
             
             # Chunk the document
-            chunks = await get_chunks(
+            chunks = await get_chunks_v2(
                 doc_string,
                 self.tokenizer_wrapper,
                 self.chunk_func,
@@ -231,19 +234,21 @@ class GraphRAG:
                 chunk["doc_id"] = doc_id
                 await self.text_chunks.upsert({chunk_id: chunk})
                 
-                # Extract entities if local query is enabled
-                if self.config.query.enable_local:
-                    entities = await self.entity_extraction_func(
-                        chunk["content"],
-                        self.cheap_model_func,
-                        self.tokenizer_wrapper,
-                        self.config.entity_extraction.max_gleaning,
-                        self.config.entity_extraction.summary_max_tokens,
-                        self.convert_response_to_json_func
-                    )
-                    
-                    # Store entities in graph
+            # Extract entities if local query is enabled
+            if self.config.query.enable_local:
+                entities = await extract_entities_from_chunks(
+                    chunks,
+                    self.cheap_model_func,
+                    self.tokenizer_wrapper,
+                    self.config.entity_extraction.max_gleaning,
+                    self.config.entity_extraction.summary_max_tokens,
+                    self.convert_response_to_json_func
+                )
+                
+                # Store entities in graph
+                if entities["nodes"]:
                     await self.chunk_entity_relation_graph.upsert_nodes(entities["nodes"])
+                if entities["edges"]:
                     await self.chunk_entity_relation_graph.upsert_edges(entities["edges"])
             
             # Store chunks in vector DB if naive RAG is enabled
@@ -259,26 +264,32 @@ class GraphRAG:
         # Generate community reports if local query is enabled
         if self.config.query.enable_local:
             await self._generate_community_reports()
+        
+        # Flush all storage to ensure persistence
+        await self._flush_storage()
     
     async def _generate_community_reports(self):
         """Generate community reports for graph clusters."""
-        # Get graph clusters
-        clusters = await self.chunk_entity_relation_graph.get_clusters(
-            algorithm=self.config.graph_clustering.algorithm,
-            max_size=self.config.graph_clustering.max_cluster_size,
-            seed=self.config.graph_clustering.seed
-        )
+        # Get graph clusters using community schema
+        try:
+            communities = await self.chunk_entity_relation_graph.community_schema()
+        except AttributeError:
+            # Fallback if community_schema not available
+            logger.warning("Graph storage doesn't support community_schema, skipping reports")
+            return
         
-        # Generate report for each cluster
-        for cluster_id, cluster_nodes in clusters.items():
-            report = await generate_community_report(
-                cluster_nodes,
-                self.chunk_entity_relation_graph,
-                self.best_model_func,
-                self.config.llm.max_tokens,
-                self.convert_response_to_json_func
-            )
-            await self.community_reports.upsert({f"community-{cluster_id}": report})
+        # Generate report for each community
+        for community_id, node_ids in communities.items():
+            if node_ids:  # Only process non-empty communities
+                report = await summarize_community(
+                    node_ids,
+                    self.chunk_entity_relation_graph,
+                    self.best_model_func,
+                    self.config.llm.max_tokens,
+                    self.convert_response_to_json_func,
+                    self.tokenizer_wrapper
+                )
+                await self.community_reports.upsert({f"community-{community_id}": report})
         
         # Update entities vector DB with embeddings
         if self.entities_vdb:
@@ -333,3 +344,25 @@ class GraphRAG:
             )
         else:
             raise ValueError(f"Unknown query mode: {param.mode}")
+    
+    async def _flush_storage(self):
+        """Flush all storage backends to ensure persistence."""
+        # Flush KV storage
+        if hasattr(self.full_docs, 'index_done_callback'):
+            await self.full_docs.index_done_callback()
+        if hasattr(self.text_chunks, 'index_done_callback'):
+            await self.text_chunks.index_done_callback()
+        if hasattr(self.community_reports, 'index_done_callback'):
+            await self.community_reports.index_done_callback()
+        if self.llm_response_cache and hasattr(self.llm_response_cache, 'index_done_callback'):
+            await self.llm_response_cache.index_done_callback()
+        
+        # Flush graph storage
+        if hasattr(self.chunk_entity_relation_graph, 'index_done_callback'):
+            await self.chunk_entity_relation_graph.index_done_callback()
+        
+        # Flush vector storage
+        if self.entities_vdb and hasattr(self.entities_vdb, 'index_done_callback'):
+            await self.entities_vdb.index_done_callback()
+        if self.chunks_vdb and hasattr(self.chunks_vdb, 'index_done_callback'):
+            await self.chunks_vdb.index_done_callback()

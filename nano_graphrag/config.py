@@ -98,16 +98,17 @@ class StorageConfig:
     
     def __post_init__(self):
         """Validate configuration."""
-        valid_vector_backends = {"nano", "hnswlib", "milvus", "qdrant", "faiss"}
-        valid_graph_backends = {"networkx", "neo4j"}
-        valid_kv_backends = {"json", "redis"}
+        # Only allow implemented backends
+        valid_vector_backends = {"nano", "hnswlib"}
+        valid_graph_backends = {"networkx"}
+        valid_kv_backends = {"json"}
         
         if self.vector_backend not in valid_vector_backends:
-            raise ValueError(f"Unknown vector backend: {self.vector_backend}")
+            raise ValueError(f"Unknown vector backend: {self.vector_backend}. Available: {valid_vector_backends}")
         if self.graph_backend not in valid_graph_backends:
-            raise ValueError(f"Unknown graph backend: {self.graph_backend}")
+            raise ValueError(f"Unknown graph backend: {self.graph_backend}. Available: {valid_graph_backends}")
         if self.kv_backend not in valid_kv_backends:
-            raise ValueError(f"Unknown KV backend: {self.kv_backend}")
+            raise ValueError(f"Unknown KV backend: {self.kv_backend}. Available: {valid_kv_backends}")
 
 
 @dataclass(frozen=True)
