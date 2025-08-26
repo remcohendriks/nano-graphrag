@@ -1,209 +1,242 @@
-# NGRAF-005: Unified Caching Layer
+# NGRAF-005: Minimal Cache Abstraction Layer
 
 ## Summary
-Create a single, pluggable caching abstraction to replace scattered caching logic across LLM calls, embeddings, and Redis.
+Create a minimal, pluggable cache interface that wraps existing KV storage while maintaining current behavior and allowing optional backends.
+
+## Context
+After NGRAF-001/002/003, caching exists via `BaseLLMProvider.complete_with_cache()` using `hashing_kv` (JsonKVStorage). This ticket provides a cleaner abstraction without invasive changes.
 
 ## Problem
-- Caching logic duplicated in each LLM provider function
-- Redis caching in `app.py` separate from LLM response cache
-- Hash computation repeated (`compute_args_hash`) in multiple places
-- No consistent cache invalidation strategy
+- Caching tightly coupled to KV storage implementation
+- No TTL support (cache grows indefinitely)
+- No cache metrics (hit/miss rates)
+- Direct use of storage internals in provider code
 
-## Technical Solution
+## Technical Solution (Low Complexity)
 
+### Minimal Cache Interface
 ```python
 # nano_graphrag/cache/base.py
 from typing import Optional, Any, Protocol
-from abc import abstractmethod
 
 class CacheBackend(Protocol):
-    @abstractmethod
+    """Minimal cache interface matching existing usage patterns."""
+    
     async def get(self, key: str) -> Optional[Any]:
         """Retrieve value from cache"""
-        pass
+        ...
     
-    @abstractmethod
     async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        """Store value in cache with optional TTL"""
-        pass
+        """Store value in cache with optional TTL (may be no-op for some backends)"""
+        ...
     
-    @abstractmethod
     async def delete(self, key: str) -> None:
         """Remove value from cache"""
-        pass
+        ...
 
 # nano_graphrag/cache/implementations.py
+from nano_graphrag.base import BaseKVStorage
+from typing import Dict, Any, Optional
+
+class KVCache(CacheBackend):
+    """Adapter wrapping existing KV storage to provide cache interface."""
+    
+    def __init__(self, kv_storage: BaseKVStorage):
+        self._kv = kv_storage
+    
+    async def get(self, key: str) -> Optional[Any]:
+        """Get from KV storage, extracting 'return' field if present."""
+        result = await self._kv.get_by_id(key)
+        if result is None:
+            return None
+        # Handle both old format {"return": value} and direct values
+        return result.get("return", result) if isinstance(result, dict) else result
+    
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        """Set in KV storage (TTL ignored for JSON backend)."""
+        await self._kv.upsert({key: {"return": value, "cached": True}})
+        await self._kv.index_done_callback()
+    
+    async def delete(self, key: str) -> None:
+        """Delete from KV storage if supported."""
+        # JSON KV doesn't have delete, so this is a no-op
+        pass
+
 class MemoryCache(CacheBackend):
+    """Simple in-memory cache for testing."""
+    
     def __init__(self):
         self._cache: Dict[str, Any] = {}
     
     async def get(self, key: str) -> Optional[Any]:
         return self._cache.get(key)
-
-class RedisCache(CacheBackend):
-    def __init__(self, url: str = "redis://localhost:6379"):
-        self.client = redis.from_url(url)
     
-    async def get(self, key: str) -> Optional[Any]:
-        value = await self.client.get(key)
-        return json.loads(value) if value else None
-
-# nano_graphrag/cache/decorator.py
-def cached(cache: CacheBackend, ttl: Optional[int] = None):
-    def decorator(func):
-        async def wrapper(*args, **kwargs):
-            # Generate cache key from function and arguments
-            cache_key = f"{func.__name__}:{hash(args)}:{hash(frozenset(kwargs.items()))}"
-            
-            # Try cache first
-            cached_value = await cache.get(cache_key)
-            if cached_value is not None:
-                return cached_value
-            
-            # Compute and cache result
-            result = await func(*args, **kwargs)
-            await cache.set(cache_key, result, ttl)
-            return result
-        return wrapper
-    return decorator
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        # TTL ignored for simplicity
+        self._cache[key] = value
+    
+    async def delete(self, key: str) -> None:
+        self._cache.pop(key, None)
 ```
 
-## Code Changes
+### Integration Without Disruption
+```python
+# In BaseLLMProvider - minimal change to existing code
+async def complete_with_cache(self, ..., hashing_kv=None, cache=None, ...):
+    """Support both old hashing_kv and new cache interface."""
+    # Backward compatibility: wrap hashing_kv as cache if needed
+    if cache is None and hashing_kv is not None:
+        from ..cache.implementations import KVCache
+        cache = KVCache(hashing_kv)
+    
+    if cache is not None:
+        key = compute_args_hash(self.model, messages)
+        cached_result = await cache.get(key)
+        if cached_result is not None:
+            return cached_result
+    
+    response = await self.complete(...)
+    result = response["text"]
+    
+    if cache is not None:
+        await cache.set(key, result)
+    
+    return result
+```
+
+## Code Changes (Minimal)
 
 ### New Files
-- `nano_graphrag/cache/base.py` - Cache protocol definition
-- `nano_graphrag/cache/implementations.py` - Memory, Redis, JSON cache backends
-- `nano_graphrag/cache/decorator.py` - Caching decorator for functions
+- `nano_graphrag/cache/__init__.py` - Package exports
+- `nano_graphrag/cache/base.py` - Cache protocol (15 lines)
+- `nano_graphrag/cache/implementations.py` - KVCache adapter + MemoryCache (50 lines)
 
-### Modified Files
-- `nano_graphrag/_llm.py` - Replace manual caching with decorator:
+### Modified Files (Backward Compatible)
+- `nano_graphrag/llm/base.py` - Add optional `cache` parameter to `complete_with_cache()`:
   ```python
-  # Before
-  if hashing_kv is not None:
-      args_hash = compute_args_hash(model, messages)
-      if_cache_return = await hashing_kv.get_by_id(args_hash)
-      if if_cache_return is not None:
-          return if_cache_return["return"]
-  
-  # After
-  @cached(cache=self.cache, ttl=3600)
-  async def complete(self, prompt: str, **kwargs) -> str:
-      # Direct implementation without caching logic
-      response = await self.client.chat.completions.create(...)
-      return response.choices[0].message.content
+  # Minimal change - add cache parameter with backward compatibility
+  async def complete_with_cache(self, ..., hashing_kv=None, cache=None, ...):
+      # Auto-wrap hashing_kv as cache if needed
+      if cache is None and hashing_kv is not None:
+          cache = KVCache(hashing_kv)
   ```
 
-- `app.py` - Use unified cache:
+- `nano_graphrag/graphrag.py` - Optionally use cache interface:
   ```python
-  # Before: Separate Redis logic
-  cached_response = await redis_client.get(cache_key)
+  # Option 1: Keep current behavior (no change needed)
+  self.llm_response_cache = JsonKVStorage(...) if cache_enabled else None
   
-  # After: Unified cache
-  cache = RedisCache() if REDIS_ENABLED else MemoryCache()
-  graphrag = NanoGraphRAG(config, cache=cache)
+  # Option 2: Use new interface (optional improvement)
+  from .cache.implementations import KVCache
+  kv_storage = JsonKVStorage(...) if cache_enabled else None
+  self.cache = KVCache(kv_storage) if kv_storage else None
   ```
+
+### NOT Changed (Avoiding Complexity)
+- ❌ No decorator pattern (doesn't fit streaming, adds complexity)
+- ❌ No Redis dependency (keep library lightweight)
+- ❌ No app.py changes (doesn't exist)
+- ❌ No breaking changes to existing code
 
 ## Definition of Done
 
-### Unit Tests Required
+### Unit Tests Required (Focused)
 ```python
 # tests/cache/test_cache.py
 import pytest
 from unittest.mock import AsyncMock, Mock
-from nano_graphrag.cache import MemoryCache, RedisCache, cached
+from nano_graphrag.cache import KVCache, MemoryCache
+from nano_graphrag.base import BaseKVStorage
 
-class TestCaching:
+class TestCacheImplementations:
     @pytest.mark.asyncio
     async def test_memory_cache_basic_operations(self):
         """Verify memory cache get/set/delete"""
         cache = MemoryCache()
         
-        await cache.set("key", "value")
-        assert await cache.get("key") == "value"
+        # Test set and get
+        await cache.set("key1", "value1")
+        assert await cache.get("key1") == "value1"
+        assert await cache.get("nonexistent") is None
         
-        await cache.delete("key")
-        assert await cache.get("key") is None
+        # Test delete
+        await cache.delete("key1")
+        assert await cache.get("key1") is None
     
     @pytest.mark.asyncio
-    async def test_redis_cache_with_ttl(self):
-        """Verify Redis cache respects TTL"""
-        with patch('redis.asyncio.from_url') as mock_redis:
-            mock_client = AsyncMock()
-            mock_redis.return_value = mock_client
-            
-            cache = RedisCache()
-            await cache.set("key", "value", ttl=60)
-            
-            mock_client.set.assert_called_with("key", '"value"', ex=60)
+    async def test_kv_cache_adapter(self):
+        """Verify KVCache correctly wraps KV storage"""
+        mock_kv = AsyncMock(spec=BaseKVStorage)
+        cache = KVCache(mock_kv)
+        
+        # Test get - with old format
+        mock_kv.get_by_id.return_value = {"return": "cached_value"}
+        result = await cache.get("test_key")
+        assert result == "cached_value"
+        mock_kv.get_by_id.assert_called_with("test_key")
+        
+        # Test get - cache miss
+        mock_kv.get_by_id.return_value = None
+        result = await cache.get("missing_key")
+        assert result is None
+        
+        # Test set
+        await cache.set("new_key", "new_value")
+        mock_kv.upsert.assert_called_with({
+            "new_key": {"return": "new_value", "cached": True}
+        })
+        mock_kv.index_done_callback.assert_called()
     
     @pytest.mark.asyncio
-    async def test_cache_decorator(self):
-        """Verify decorator caches function results"""
-        cache = MemoryCache()
-        call_count = 0
+    async def test_cache_backend_protocol(self):
+        """Verify both implementations satisfy CacheBackend protocol"""
+        from nano_graphrag.cache.base import CacheBackend
         
-        @cached(cache=cache)
-        async def expensive_function(x: int) -> int:
-            nonlocal call_count
-            call_count += 1
-            return x * 2
+        # Both should be valid CacheBackend implementations
+        memory_cache = MemoryCache()
+        kv_cache = KVCache(AsyncMock(spec=BaseKVStorage))
         
-        result1 = await expensive_function(5)
-        result2 = await expensive_function(5)
-        
-        assert result1 == 10
-        assert result2 == 10
-        assert call_count == 1  # Function called only once
+        # Protocol methods should exist
+        for cache in [memory_cache, kv_cache]:
+            assert hasattr(cache, 'get')
+            assert hasattr(cache, 'set')
+            assert hasattr(cache, 'delete')
     
     @pytest.mark.asyncio
-    async def test_cache_key_generation(self):
-        """Verify cache keys are unique per function/args"""
-        cache = MemoryCache()
+    async def test_backward_compatibility(self):
+        """Verify existing hashing_kv code continues to work"""
+        from nano_graphrag.llm.base import BaseLLMProvider
         
-        @cached(cache=cache)
-        async def func1(x): return x
+        mock_provider = Mock(spec=BaseLLMProvider)
+        mock_kv = AsyncMock(spec=BaseKVStorage)
         
-        @cached(cache=cache)
-        async def func2(x): return x * 2
+        # Existing code should still work with hashing_kv
+        mock_kv.get_by_id.return_value = {"return": "cached_response"}
         
-        await func1(5)
-        await func2(5)
-        
-        # Different functions with same args should have different keys
-        assert len(cache._cache) == 2
-    
-    @pytest.mark.asyncio
-    async def test_cache_invalidation(self):
-        """Verify cache can be invalidated"""
-        cache = MemoryCache()
-        
-        @cached(cache=cache)
-        async def get_data():
-            return "original"
-        
-        result1 = await get_data()
-        await cache.delete_pattern("get_data:*")
-        
-        # After invalidation, should recompute
-        get_data.__wrapped__ = AsyncMock(return_value="updated")
-        result2 = await get_data()
-        
-        assert result1 == "original"
-        assert result2 == "updated"
+        # Simulate the complete_with_cache pattern
+        result = await mock_kv.get_by_id("some_hash")
+        assert result["return"] == "cached_response"
 ```
 
-### Additional Test Coverage
-- Test cache backends are interchangeable
-- Test concurrent cache access
-- Test cache serialization of complex objects
-- Test cache performance improvements
+### Test Scope (What NOT to Test)
+- ❌ No decorator tests (not implementing decorators)
+- ❌ No Redis tests (not adding Redis dependency)
+- ❌ No pattern deletion tests (keeping it simple)
 
 ## Feature Branch
-`feature/ngraf-005-unified-caching`
+`feature/ngraf-005-minimal-cache`
 
 ## Pull Request Must Include
-- Single cache abstraction for all caching needs
-- Pluggable cache backends (Memory, Redis, JSON)
-- Cache decorator for clean function decoration
-- Proper typing for cache operations
-- All tests passing with >90% coverage
+- Minimal cache protocol (CacheBackend)
+- KVCache adapter wrapping existing storage
+- MemoryCache for testing
+- Backward compatibility maintained
+- All tests passing
+- No breaking changes
+
+## Benefits
+- **Cleaner abstraction**: Cache operations separate from storage details
+- **Testability**: Easy to mock cache in tests
+- **Future extensibility**: Can add Redis/other backends later
+- **Low risk**: Minimal changes, backward compatible
+- **Maintainable**: ~65 lines of new code total

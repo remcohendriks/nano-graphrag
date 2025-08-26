@@ -1,6 +1,25 @@
-# NGRAF-004: Separate Application Logic from Core Library
+# NGRAF-004: [WON'T DO] Separate Application Logic from Core Library
 
-## Summary
+## Status: WON'T DO
+
+### Reason for Closure
+This ticket was based on an incorrect understanding of the codebase structure. The ticket references:
+- `app.py` with FastAPI application logic
+- `deepseek.py` with DeepSeek integration and executive order parsing
+- Federal Register API logic embedded in core files
+- Redis caching tied to application layer
+
+However, after thorough investigation:
+1. **These files do not exist** in the current nano-graphrag repository
+2. The repository is already a **clean library-only implementation**
+3. There is no app logic to separate - the separation already exists
+4. The confusion arose from reviewing a different fork or modified version
+
+The current codebase properly maintains library boundaries and does not mix application concerns with library code. Therefore, this ticket is invalid and marked as WON'T DO.
+
+---
+
+## Original Summary (Invalid)
 Extract FastAPI application and executive order logic from core nano-graphrag, creating clear separation between library and application.
 
 ## Problem
