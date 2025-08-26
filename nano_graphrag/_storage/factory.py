@@ -182,16 +182,17 @@ def _register_backends():
     """Register built-in backends. Called when factory is first used."""
     # Register vector backends if not already registered
     if not StorageFactory._vector_backends:
-        from nano_graphrag._storage import HNSWVectorStorage, NanoVectorDBStorage
+        from .vdb_hnswlib import HNSWVectorStorage
+        from .vdb_nanovectordb import NanoVectorDBStorage
         StorageFactory.register_vector("hnswlib", HNSWVectorStorage)
         StorageFactory.register_vector("nano", NanoVectorDBStorage)
     
     # Register graph backends if not already registered
     if not StorageFactory._graph_backends:
-        from nano_graphrag._storage import NetworkXStorage
+        from .gdb_networkx import NetworkXStorage
         StorageFactory.register_graph("networkx", NetworkXStorage)
     
     # Register KV backends if not already registered
     if not StorageFactory._kv_backends:
-        from nano_graphrag._storage import JsonKVStorage
+        from .kv_json import JsonKVStorage
         StorageFactory.register_kv("json", JsonKVStorage)

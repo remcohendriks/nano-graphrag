@@ -19,11 +19,6 @@ from ._op import (
     global_query,
     naive_query,
 )
-from ._storage import (
-    JsonKVStorage,
-    NanoVectorDBStorage,
-    NetworkXStorage,
-)
 from ._storage.factory import StorageFactory, _register_backends
 from ._utils import (
     EmbeddingFunc,
