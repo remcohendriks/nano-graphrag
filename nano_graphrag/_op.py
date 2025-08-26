@@ -1138,3 +1138,207 @@ async def naive_query(
         system_prompt=sys_prompt,
     )
     return response
+
+
+# ============= New wrapper functions for clean config-based API =============
+
+async def get_chunks_v2(
+    text_or_texts: Union[str, list[str]],
+    tokenizer_wrapper: TokenizerWrapper,
+    chunk_func=chunking_by_token_size,
+    size: int = 1200,
+    overlap: int = 100
+) -> list[TextChunkSchema]:
+    """Get chunks from text(s) - clean API for new config system.
+    
+    Args:
+        text_or_texts: Single text or list of texts to chunk
+        tokenizer_wrapper: Tokenizer for encoding
+        chunk_func: Function to perform chunking
+        size: Maximum token size per chunk
+        overlap: Token overlap between chunks
+        
+    Returns:
+        List of chunk dictionaries with content and metadata
+    """
+    texts = [text_or_texts] if isinstance(text_or_texts, str) else list(text_or_texts)
+    tokens = [tokenizer_wrapper.encode(t) for t in texts]
+    doc_keys = [f"doc-{i}" for i in range(len(texts))]
+    
+    chunks = chunk_func(
+        tokens,
+        doc_keys=doc_keys,
+        tokenizer_wrapper=tokenizer_wrapper,
+        overlap_token_size=overlap,
+        max_token_size=size
+    )
+    return chunks
+
+
+async def extract_entities_from_chunks(
+    chunks: list[TextChunkSchema],
+    model_func: callable,
+    tokenizer_wrapper: TokenizerWrapper,
+    max_gleaning: int = 1,
+    summary_max_tokens: int = 500,
+    to_json_func: callable = None
+) -> dict:
+    """Extract entities from chunks without storage side effects.
+    
+    Args:
+        chunks: List of text chunks
+        model_func: LLM function for extraction
+        tokenizer_wrapper: Tokenizer
+        max_gleaning: Number of extraction iterations
+        summary_max_tokens: Max tokens for summaries
+        to_json_func: Function to convert responses to JSON
+        
+    Returns:
+        Dictionary with 'nodes' and 'edges' lists
+    """
+    if to_json_func is None:
+        from ._utils import convert_response_to_json
+        to_json_func = convert_response_to_json
+    
+    entity_extract_prompt = PROMPTS["entity_extraction"]
+    context_base = dict(
+        tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
+        record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
+        completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
+        entity_types=PROMPTS["DEFAULT_ENTITY_TYPES"]
+    )
+    
+    all_entities = {}
+    all_relationships = []
+    
+    for chunk in chunks:
+        context = dict(
+            input_text=chunk["content"],
+            **context_base
+        )
+        
+        for glean_index in range(max_gleaning):
+            if glean_index == 0:
+                response = await model_func(
+                    entity_extract_prompt.format(**context)
+                )
+            else:
+                context["input_text"] = response
+                response = await model_func(
+                    PROMPTS.get("entiti_continue_extraction", PROMPTS.get("entity_extraction", "")).format(**context)
+                )
+            
+            # Parse entities and relationships from response
+            try:
+                data = to_json_func(response)
+                if "entities" in data:
+                    for entity in data["entities"]:
+                        if entity["name"] not in all_entities:
+                            all_entities[entity["name"]] = entity
+                        else:
+                            # Merge descriptions
+                            existing = all_entities[entity["name"]]
+                            existing["description"] = f"{existing['description']} {entity.get('description', '')}"
+                
+                if "relationships" in data:
+                    all_relationships.extend(data["relationships"])
+            except:
+                # If parsing fails, try to extract from text
+                pass
+    
+    # Convert to nodes and edges format
+    nodes = [
+        {
+            "id": name,
+            "name": name,
+            "type": entity.get("type", "UNKNOWN"),
+            "description": entity.get("description", "")[:summary_max_tokens]
+        }
+        for name, entity in all_entities.items()
+    ]
+    
+    edges = [
+        {
+            "source": rel.get("source", rel.get("from")),
+            "target": rel.get("target", rel.get("to")),
+            "relation": rel.get("relation", rel.get("type", "RELATED")),
+            "description": rel.get("description", "")
+        }
+        for rel in all_relationships
+        if rel.get("source") or rel.get("from")
+    ]
+    
+    return {"nodes": nodes, "edges": edges}
+
+
+async def summarize_community(
+    node_ids: list[str],
+    graph: BaseGraphStorage,
+    model_func: callable,
+    max_tokens: int = 2048,
+    to_json_func: callable = None,
+    tokenizer_wrapper: TokenizerWrapper = None
+) -> dict:
+    """Summarize a single community of nodes.
+    
+    Args:
+        node_ids: List of node IDs in the community
+        graph: Graph storage to fetch node/edge data
+        model_func: LLM function for summarization
+        max_tokens: Maximum tokens for summary
+        to_json_func: Function to convert response to JSON
+        tokenizer_wrapper: Tokenizer for truncation
+        
+    Returns:
+        Community report dictionary
+    """
+    if to_json_func is None:
+        from ._utils import convert_response_to_json
+        to_json_func = convert_response_to_json
+    
+    # Get nodes and edges for this community
+    nodes_data = []
+    edges_data = []
+    
+    for node_id in node_ids:
+        node = await graph.get_node(node_id)
+        if node:
+            nodes_data.append(node)
+            # Get edges from this node
+            edges = await graph.get_node_edges(node_id)
+            edges_data.extend(edges)
+    
+    # Build description
+    description_parts = []
+    
+    # Add nodes
+    if nodes_data:
+        description_parts.append("Entities:")
+        for node in nodes_data[:20]:  # Limit to prevent token overflow
+            description_parts.append(f"- {node.get('name', node.get('id'))}: {node.get('description', '')[:200]}")
+    
+    # Add relationships
+    if edges_data:
+        description_parts.append("\nRelationships:")
+        for edge in edges_data[:20]:  # Limit to prevent token overflow
+            description_parts.append(
+                f"- {edge.get('source')} -> {edge.get('target')}: {edge.get('relation', 'RELATED')}"
+            )
+    
+    describe = "\n".join(description_parts)
+    
+    # Generate summary
+    prompt = PROMPTS.get("community_report", "Summarize this community:\n{describe}")
+    response = await model_func(prompt.format(describe=describe))
+    
+    # Try to parse as JSON, otherwise use as text
+    try:
+        report_data = to_json_func(response)
+    except:
+        report_data = {
+            "summary": response[:max_tokens],
+            "entities": [n.get("name", n.get("id")) for n in nodes_data],
+            "relationships": len(edges_data)
+        }
+    
+    return report_data

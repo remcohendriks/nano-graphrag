@@ -18,15 +18,15 @@ This is the latest version of nano-graphrag, a simple and hackable GraphRAG impl
 The system supports multiple LLM providers with hot-swappable configurations:
 
 1. **OpenAI Models** (Default)
-   - Best Model: `gpt-4o` 
-   - Cheap Model: `gpt-4o-mini` (actually uses `gpt-4.1-mini`)
+   - Best Model: `gpt-5` 
+   - Cheap Model: `gpt-5-mini`
    - Functions: `gpt_4o_complete()`, `gpt_4o_mini_complete()`
    - Location: `nano_graphrag/_llm.py:154-175`
 
 2. **Azure OpenAI** 
    - Enabled via: `using_azure_openai=True`
-   - Best Model: `gpt-4o` deployment
-   - Cheap Model: `gpt-4o-mini` deployment  
+   - Best Model: `gpt-5` deployment
+   - Cheap Model: `gpt-5-mini` deployment  
    - Functions: `azure_gpt_4o_complete()`, `azure_gpt_4o_mini_complete()`
    - Location: `nano_graphrag/_llm.py:259-280`
 
@@ -347,3 +347,13 @@ To refactor from modified to clean version:
 4. Separate API layer from core logic
 5. Add comprehensive configuration management
 6. Implement proper dependency injection
+
+### When updating infrastructure:
+- ive added a dir ./llm/nano-graphrag/tickets - which is going to serve as project tickets store. inside, markdown documents reside, each detailing a JIRA-style ticket resembling a development/code change into the project. except for user story and detailed code change proposal, it should also include feature branch name, and details what the pull request should contain/
+- all the jira-style tickets you are to make, are aimed for claude code to implement. hence, you can detail it such for claude code easy to understand. you can leave out strict details like story points, implementation time paths, you can just stick to the technicalities.
+- with defining jira tickets, add definitions-of-done, which should be unit tests with pytorch, unless other suggested or specified by the user.
+- aim for least complexity and good user-readability. the repository contains novel techniques with complex programming. ensure python typings are in order. add comments conservatively, mainly to explain function uses and hard-to-understand complex items. do NOT use comments to denote changes from the past. do NOT use comments where typings suffice.
+- in unit testing llm-depdendent programming, you are allowed to use an openai mini model for testing, where applicable
+- the openai models available are gpt-5 and gpt-5-mini
+- use context7 mcp copiously to inform yourself about the latest package definitions and api's
+- for tests, put testing files in a `tests` folder adjacent to the file to be tested

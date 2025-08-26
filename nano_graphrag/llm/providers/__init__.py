@@ -1,5 +1,8 @@
 """LLM Provider implementations."""
 
+from typing import Optional, Any
+from ..base import BaseLLMProvider, BaseEmbeddingProvider
+
 from .openai import (
     OpenAIProvider,
     OpenAIEmbeddingProvider,
@@ -26,7 +29,63 @@ from .bedrock import (
     amazon_bedrock_embedding,
 )
 
+
+def get_llm_provider(
+    provider_type: str, 
+    model: str,
+    config: Optional[Any] = None
+) -> BaseLLMProvider:
+    """Factory function to get LLM provider instance.
+    
+    Args:
+        provider_type: Type of provider (openai, azure, bedrock, deepseek)
+        model: Model name
+        config: Optional configuration object
+        
+    Returns:
+        LLM provider instance
+    """
+    if provider_type == "openai":
+        return OpenAIProvider(model=model)
+    elif provider_type == "azure":
+        return AzureOpenAIProvider(model=model)
+    elif provider_type == "bedrock":
+        return BedrockProvider(model=model)
+    elif provider_type == "deepseek":
+        return DeepSeekProvider(model=model)
+    else:
+        raise ValueError(f"Unknown LLM provider type: {provider_type}")
+
+
+def get_embedding_provider(
+    provider_type: str,
+    model: str,
+    config: Optional[Any] = None
+) -> BaseEmbeddingProvider:
+    """Factory function to get embedding provider instance.
+    
+    Args:
+        provider_type: Type of provider (openai, azure, bedrock)
+        model: Model name
+        config: Optional configuration object
+        
+    Returns:
+        Embedding provider instance
+    """
+    if provider_type == "openai":
+        return OpenAIEmbeddingProvider(model=model)
+    elif provider_type == "azure":
+        return AzureOpenAIEmbeddingProvider(model=model)
+    elif provider_type == "bedrock":
+        return BedrockEmbeddingProvider(model=model)
+    else:
+        raise ValueError(f"Unknown embedding provider type: {provider_type}")
+
+
 __all__ = [
+    # Factory functions
+    "get_llm_provider",
+    "get_embedding_provider",
     # Providers
     "OpenAIProvider",
     "OpenAIEmbeddingProvider",
