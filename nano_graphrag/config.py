@@ -241,7 +241,7 @@ class GraphRAGConfig:
     
     def to_dict(self) -> dict:
         """Convert config to dictionary for compatibility."""
-        return {
+        config_dict = {
             'working_dir': self.storage.working_dir,
             'enable_local': self.query.enable_local,
             'enable_naive_rag': self.query.enable_naive_rag,
@@ -276,3 +276,14 @@ class GraphRAGConfig:
             'always_create_working_dir': True,
             'addon_params': {},
         }
+        
+        # Add HNSW-specific parameters if using hnswlib backend
+        if self.storage.vector_backend == "hnswlib":
+            config_dict['vector_db_storage_cls_kwargs'] = {
+                'ef_construction': self.storage.hnsw_ef_construction,
+                'ef_search': self.storage.hnsw_ef_search,
+                'M': self.storage.hnsw_m,
+                'max_elements': self.storage.hnsw_max_elements,
+            }
+        
+        return config_dict

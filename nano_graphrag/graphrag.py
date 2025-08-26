@@ -24,6 +24,7 @@ from ._storage import (
     NanoVectorDBStorage,
     NetworkXStorage,
 )
+from ._storage.factory import StorageFactory, _register_backends
 from ._utils import (
     EmbeddingFunc,
     compute_mdhash_id,
@@ -96,81 +97,71 @@ class GraphRAG:
         self.embedding_func = self.embedding_provider.embed
     
     def _init_storage(self):
-        """Initialize storage backends."""
+        """Initialize storage backends using factory pattern."""
+        # Register backends lazily
+        _register_backends()
+        
         # Get global config dict for storage classes
         global_config = self.config.to_dict()
         
         # Initialize KV storage
-        self.full_docs = self._get_kv_storage("full_docs", global_config)
-        self.text_chunks = self._get_kv_storage("text_chunks", global_config)
-        self.community_reports = self._get_kv_storage("community_reports", global_config)
+        self.full_docs = StorageFactory.create_kv_storage(
+            backend=self.config.storage.kv_backend,
+            namespace="full_docs",
+            global_config=global_config
+        )
+        self.text_chunks = StorageFactory.create_kv_storage(
+            backend=self.config.storage.kv_backend,
+            namespace="text_chunks",
+            global_config=global_config
+        )
+        self.community_reports = StorageFactory.create_kv_storage(
+            backend=self.config.storage.kv_backend,
+            namespace="community_reports",
+            global_config=global_config
+        )
         
         # Initialize LLM cache if enabled
         self.llm_response_cache = (
-            self._get_kv_storage("llm_response_cache", global_config)
+            StorageFactory.create_kv_storage(
+                backend=self.config.storage.kv_backend,
+                namespace="llm_response_cache",
+                global_config=global_config
+            )
             if self.config.llm.cache_enabled
             else None
         )
         
         # Initialize graph storage
-        self.chunk_entity_relation_graph = self._get_graph_storage(
-            "chunk_entity_relation", global_config
+        self.chunk_entity_relation_graph = StorageFactory.create_graph_storage(
+            backend=self.config.storage.graph_backend,
+            namespace="chunk_entity_relation",
+            global_config=global_config
         )
         
         # Initialize vector storage
-        self.entities_vdb = (
-            self._get_vector_storage(
-                "entities", 
-                global_config,
-                meta_fields={"entity_name"}
+        if self.config.query.enable_local:
+            self.entities_vdb = StorageFactory.create_vector_storage(
+                backend=self.config.storage.vector_backend,
+                namespace="entities",
+                global_config=global_config,
+                embedding_func=self.embedding_func,
+                meta_fields={"entity_name", "entity_type"}
             )
-            if self.config.query.enable_local
-            else None
-        )
+        else:
+            self.entities_vdb = None
         
-        self.chunks_vdb = (
-            self._get_vector_storage("chunks", global_config)
-            if self.config.query.enable_naive_rag
-            else None
-        )
-    
-    def _get_kv_storage(self, namespace: str, global_config: dict) -> BaseKVStorage:
-        """Get KV storage instance based on config."""
-        if self.config.storage.kv_backend == "json":
-            return JsonKVStorage(namespace=namespace, global_config=global_config)
+        if self.config.query.enable_naive_rag:
+            self.chunks_vdb = StorageFactory.create_vector_storage(
+                backend=self.config.storage.vector_backend,
+                namespace="chunks",
+                global_config=global_config,
+                embedding_func=self.embedding_func,
+                meta_fields={"doc_id"}
+            )
         else:
-            raise ValueError(f"Unknown KV backend: {self.config.storage.kv_backend}")
+            self.chunks_vdb = None
     
-    def _get_graph_storage(self, namespace: str, global_config: dict) -> BaseGraphStorage:
-        """Get graph storage instance based on config."""
-        if self.config.storage.graph_backend == "networkx":
-            return NetworkXStorage(namespace=namespace, global_config=global_config)
-        else:
-            raise ValueError(f"Unknown graph backend: {self.config.storage.graph_backend}")
-    
-    def _get_vector_storage(
-        self, 
-        namespace: str, 
-        global_config: dict,
-        meta_fields: Optional[set] = None
-    ) -> BaseVectorStorage:
-        """Get vector storage instance based on config."""
-        kwargs = {
-            "namespace": namespace,
-            "global_config": global_config,
-            "embedding_func": self.embedding_func,
-        }
-        if meta_fields:
-            kwargs["meta_fields"] = meta_fields
-            
-        if self.config.storage.vector_backend == "nano":
-            return NanoVectorDBStorage(**kwargs)
-        elif self.config.storage.vector_backend == "hnswlib":
-            # Import dynamically to avoid dependency if not used
-            from ._storage import HNSWVectorStorage
-            return HNSWVectorStorage(**kwargs)
-        else:
-            raise ValueError(f"Unknown vector backend: {self.config.storage.vector_backend}")
     
     def _init_functions(self):
         """Initialize rate-limited functions."""
