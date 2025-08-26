@@ -18,15 +18,15 @@ This is the latest version of nano-graphrag, a simple and hackable GraphRAG impl
 The system supports multiple LLM providers with hot-swappable configurations:
 
 1. **OpenAI Models** (Default)
-   - Best Model: `gpt-4o` 
-   - Cheap Model: `gpt-4o-mini` (actually uses `gpt-4.1-mini`)
+   - Best Model: `gpt-5` 
+   - Cheap Model: `gpt-5-mini`
    - Functions: `gpt_4o_complete()`, `gpt_4o_mini_complete()`
    - Location: `nano_graphrag/_llm.py:154-175`
 
 2. **Azure OpenAI** 
    - Enabled via: `using_azure_openai=True`
-   - Best Model: `gpt-4o` deployment
-   - Cheap Model: `gpt-4o-mini` deployment  
+   - Best Model: `gpt-5` deployment
+   - Cheap Model: `gpt-5-mini` deployment  
    - Functions: `azure_gpt_4o_complete()`, `azure_gpt_4o_mini_complete()`
    - Location: `nano_graphrag/_llm.py:259-280`
 
