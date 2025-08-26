@@ -321,23 +321,37 @@ class GraphRAG:
         
         # Update entities vector DB with embeddings
         if self.entities_vdb and self.config.query.enable_local:
-            # Get node degree for all nodes
-            node_degrees = await self.chunk_entity_relation_graph.get_node_degree()
+            # Get all unique node IDs from community schema
+            schema = await self.chunk_entity_relation_graph.community_schema()
+            all_node_ids = sorted({node_id for comm in schema.values() for node_id in comm.get("nodes", [])})
             
-            # Build entity dict with proper format
+            # Batch fetch node data
             entity_dict = {}
-            for node_id, degree in node_degrees.items():
-                # Get full node data
-                node_data = await self.chunk_entity_relation_graph.get_node(node_id)
-                if node_data:
-                    entity_dict[node_id] = {
-                        "content": node_data.get("description", ""),
-                        "entity_name": node_data.get("name", node_id),
-                        "entity_type": node_data.get("entity_type", "UNKNOWN"),
-                    }
+            for node_id in all_node_ids:
+                # Get individual node data (batch method may not exist)
+                try:
+                    node_data = await self.chunk_entity_relation_graph.get_node(node_id)
+                    if node_data:
+                        entity_dict[node_id] = {
+                            "content": node_data.get("description", ""),
+                            "entity_name": node_data.get("name", node_id),
+                            "entity_type": node_data.get("entity_type", "UNKNOWN"),
+                        }
+                except:
+                    # Node might not exist, skip it
+                    continue
             
             if entity_dict:
                 await self.entities_vdb.upsert(entity_dict)
+    
+    def _global_config(self) -> dict:
+        """Build global config with all required fields including function references."""
+        return {
+            **self.config.to_dict(),
+            "best_model_func": self.best_model_func,
+            "cheap_model_func": self.cheap_model_func,
+            "convert_response_to_json_func": self.convert_response_to_json_func,
+        }
     
     async def aquery(self, query: str, param: QueryParam = QueryParam()):
         """Query asynchronously."""
@@ -346,6 +360,9 @@ class GraphRAG:
             raise ValueError("Local query mode is disabled in config")
         if param.mode == "naive" and not self.config.query.enable_naive_rag:
             raise ValueError("Naive RAG mode is disabled in config")
+        
+        # Get complete global config
+        cfg = self._global_config()
         
         # Execute query based on mode
         if param.mode == "local":
@@ -357,7 +374,7 @@ class GraphRAG:
                 self.text_chunks,
                 param,
                 self.tokenizer_wrapper,
-                self.config.to_dict()  # Pass full global_config
+                cfg
             )
         elif param.mode == "global":
             return await global_query(
@@ -368,7 +385,7 @@ class GraphRAG:
                 self.text_chunks,
                 param,
                 self.tokenizer_wrapper,
-                self.config.to_dict()  # Pass full global_config
+                cfg
             )
         elif param.mode == "naive":
             return await naive_query(
@@ -377,7 +394,7 @@ class GraphRAG:
                 self.text_chunks,
                 param,
                 self.tokenizer_wrapper,
-                self.config.to_dict()  # Pass full global_config
+                cfg
             )
         else:
             raise ValueError(f"Unknown query mode: {param.mode}")
