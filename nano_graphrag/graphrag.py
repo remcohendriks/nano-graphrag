@@ -289,7 +289,14 @@ class GraphRAG:
         global_config = self.config.to_dict()
         global_config["best_model_func"] = self.best_model_func
         global_config["convert_response_to_json_func"] = self.convert_response_to_json_func
-        global_config["special_community_report_llm_kwargs"] = {"response_format": {"type": "json_object"}}
+        
+        # Only add response_format for OpenAI API (not for LMStudio or other local endpoints)
+        # LMStudio doesn't support response_format parameter
+        import os
+        if not os.getenv("LLM_BASE_URL"):  # If no custom base URL, assume OpenAI
+            global_config["special_community_report_llm_kwargs"] = {"response_format": {"type": "json_object"}}
+        else:
+            global_config["special_community_report_llm_kwargs"] = {}
         
         await generate_community_report(
             self.community_reports,
@@ -352,6 +359,12 @@ class GraphRAG:
             raise ValueError("Local query mode is disabled in config")
         if param.mode == "naive" and not self.config.query.enable_naive_rag:
             raise ValueError("Naive RAG mode is disabled in config")
+        
+        # Override response_format for LMStudio (it doesn't support json_object format)
+        import os
+        if os.getenv("LLM_BASE_URL") and param.mode == "global":
+            # Clear the response_format for LMStudio
+            param.global_special_community_map_llm_kwargs = {}
         
         # Get complete global config
         cfg = self._global_config()

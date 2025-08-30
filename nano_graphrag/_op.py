@@ -316,7 +316,7 @@ async def extract_entities(
         if isinstance(final_result, list):
             final_result = final_result[0]["text"]
         
-        print(f"DEBUG: Chunk {chunk_key} - LLM returned {len(final_result) if final_result else 0} chars")
+        logger.debug(f"Chunk {chunk_key} - LLM returned {len(final_result) if final_result else 0} chars")
 
         history = pack_user_ass_to_openai_messages(hint_prompt, final_result, using_amazon_bedrock)
         for now_glean_index in range(entity_extract_max_gleaning):
@@ -369,10 +369,8 @@ async def extract_entities(
         now_ticks = PROMPTS["process_tickers"][
             already_processed % len(PROMPTS["process_tickers"])
         ]
-        print(
-            f"{now_ticks} Processed {already_processed}({already_processed*100//len(ordered_chunks)}%) chunks,  {already_entities} entities(duplicated), {already_relations} relations(duplicated)\r",
-            end="",
-            flush=True,
+        logger.debug(
+            f"{now_ticks} Processed {already_processed}({already_processed*100//len(ordered_chunks)}%) chunks,  {already_entities} entities(duplicated), {already_relations} relations(duplicated)"
         )
         return dict(maybe_nodes), dict(maybe_edges)
 
@@ -380,7 +378,7 @@ async def extract_entities(
     results = await asyncio.gather(
         *[_process_single_content(c) for c in ordered_chunks]
     )
-    print()  # clear the progress bar
+    # Progress complete
     maybe_nodes = defaultdict(list)
     maybe_edges = defaultdict(list)
     for m_nodes, m_edges in results:
@@ -390,7 +388,7 @@ async def extract_entities(
             # it's undirected graph
             maybe_edges[tuple(sorted(k))].extend(v)
     
-    print(f"DEBUG: Extracted {len(maybe_nodes)} unique entities and {len(maybe_edges)} unique relationships")
+    logger.debug(f"Extracted {len(maybe_nodes)} unique entities and {len(maybe_edges)} unique relationships")
     all_entities_data = await asyncio.gather(
         *[
             _merge_nodes_then_upsert(k, v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
@@ -663,7 +661,7 @@ async def generate_community_report(
         data = use_string_json_convert_func(response)
         already_processed += 1
         now_ticks = PROMPTS["process_tickers"][already_processed % len(PROMPTS["process_tickers"])]
-        print(f"{now_ticks} Processed {already_processed} communities\r", end="", flush=True)
+        logger.debug(f"{now_ticks} Processed {already_processed} communities")
         return data
 
     levels = sorted(set([c["level"] for c in community_values]), reverse=True)
@@ -697,7 +695,7 @@ async def generate_community_report(
                 )
             }
         )
-    print()  # clear the progress bar
+    # Progress complete
     await community_report_kv.upsert(community_datas)
 
 

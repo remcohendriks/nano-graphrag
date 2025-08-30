@@ -6,6 +6,9 @@ nano_graphrag_cache*/
 *.txt
 examples/benchmarks/fixtures/
 tests/original_workflow.txt
+
+# Health check generated data
+.health/
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/

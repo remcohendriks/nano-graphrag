@@ -8,11 +8,12 @@ import os
 import sys
 import time
 import asyncio
-import tempfile
+import json
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 # Add parent directory to path to import nano_graphrag
@@ -25,17 +26,50 @@ from nano_graphrag.config import GraphRAGConfig
 class HealthCheck:
     """End-to-end health check for nano-graphrag."""
     
-    def __init__(self, env_file: Optional[str] = None):
-        """Initialize health check with optional environment file."""
+    def __init__(self, env_file: Optional[str] = None, working_dir: Optional[str] = None, fresh: bool = False):
+        """Initialize health check with optional environment file.
+        
+        Args:
+            env_file: Environment configuration file
+            working_dir: Persistent working directory (default: .health/dickens)
+            fresh: If True, clear working directory before starting
+        """
         if env_file:
             load_dotenv(env_file, override=True)
         
-        # Create temporary working directory
-        self.working_dir = Path(tempfile.mkdtemp(prefix="nano_graphrag_health_"))
+        # Use persistent working directory by default
+        if working_dir:
+            self.working_dir = Path(working_dir).resolve()
+        else:
+            self.working_dir = Path(".health/dickens").resolve()
+        
+        # Clear if requested
+        if fresh and self.working_dir.exists():
+            shutil.rmtree(self.working_dir)
+            print(f"Cleared working directory: {self.working_dir}")
+        
+        # Create directory
+        self.working_dir.mkdir(parents=True, exist_ok=True)
         print(f"Working directory: {self.working_dir}")
         
         # Set working directory in environment for GraphRAG to pick up
         os.environ["STORAGE_WORKING_DIR"] = str(self.working_dir)
+        
+        # Initialize results tracking
+        self.results: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "mode": os.environ.get("LLM_PROVIDER", "openai"),
+            "status": "running",
+            "timings": {},
+            "counts": {
+                "nodes": 0,
+                "edges": 0,
+                "communities": 0,
+                "chunks": 0
+            },
+            "errors": [],
+            "tests": {}
+        }
         
         # Only set defaults if not already set by env file
         # These can be overridden by the config files
@@ -46,9 +80,14 @@ class HealthCheck:
         if "LLM_CACHE_ENABLED" not in os.environ:
             os.environ["LLM_CACHE_ENABLED"] = "true"  # Enable caching for repeated queries
         
-    def cleanup(self):
-        """Clean up temporary working directory."""
-        if self.working_dir.exists():
+    def cleanup(self, keep_persistent: bool = True):
+        """Clean up working directory.
+        
+        Args:
+            keep_persistent: If True, keep persistent directories (default behavior)
+        """
+        # Only clean up if it's a temp directory or explicitly requested
+        if not keep_persistent and self.working_dir.exists():
             shutil.rmtree(self.working_dir)
             print(f"Cleaned up: {self.working_dir}")
     
@@ -59,10 +98,23 @@ class HealthCheck:
             raise FileNotFoundError(f"Test data not found: {test_data_path}")
         
         with open(test_data_path, "r", encoding="utf-8") as f:
-            full_text = f.read()
+            lines = f.readlines()
         
-        # Use full text for proper testing
-        return full_text
+        # Remove empty lines
+        lines = [line for line in lines if line.strip()]
+        
+        # Truncate if TEST_DATA_LINES is set (for faster testing)
+        test_data_lines = os.environ.get("TEST_DATA_LINES")
+        if test_data_lines:
+            try:
+                max_lines = int(test_data_lines)
+                if max_lines > 0:
+                    lines = lines[:max_lines]
+                    print(f"Using first {max_lines} non-empty lines for testing")
+            except ValueError:
+                print(f"Warning: Invalid TEST_DATA_LINES value: {test_data_lines}")
+        
+        return "".join(lines)
     
     def count_graph_elements(self) -> Tuple[int, int]:
         """Count nodes and edges in the generated graph."""
@@ -134,12 +186,15 @@ class HealthCheck:
             elapsed = time.time() - start_time
             print(f"Insert completed in {elapsed:.1f} seconds")
             
-            elapsed = time.time() - start_time
-            print(f"Insert completed in {elapsed:.1f} seconds")
-            
             # Validate graph was built
             assert nodes > 10, f"Expected >10 nodes, got {nodes}"
             assert edges > 5, f"Expected >5 edges, got {edges}"
+            
+            # Store results
+            self.results["timings"]["insert"] = elapsed
+            self.results["counts"]["nodes"] = nodes
+            self.results["counts"]["edges"] = edges
+            self.results["tests"]["insert"] = "passed"
             
             return True
             
@@ -148,6 +203,8 @@ class HealthCheck:
             import traceback
             print("Traceback:")
             traceback.print_exc()
+            self.results["errors"].append(f"Insert failed: {str(e)}")
+            self.results["tests"]["insert"] = "failed"
             return False
     
     async def test_query(self, graph: GraphRAG) -> bool:
@@ -185,13 +242,18 @@ class HealthCheck:
                     all_passed = False
                     continue
                 
+                # Store timing
+                self.results["timings"][f"{mode}_query"] = elapsed
+                
                 # Validate response (more lenient)
                 min_expected = 100 if mode == "naive" else 200
                 if response_len < min_expected:
                     print(f"Warning: Response too short for {mode} (expected >{min_expected}, got {response_len})")
+                    self.results["tests"][f"{mode}_query"] = "failed"
                     all_passed = False
                 else:
                     print(f"✓ {mode.capitalize()} query passed")
+                    self.results["tests"][f"{mode}_query"] = "passed"
                 
                 # Show preview of response
                 if result:
@@ -203,6 +265,8 @@ class HealthCheck:
                 import traceback
                 print("Traceback:")
                 traceback.print_exc()
+                self.results["errors"].append(f"{mode} query failed: {str(e)}")
+                self.results["tests"][f"{mode}_query"] = "failed"
                 all_passed = False
                 continue
         
@@ -232,20 +296,39 @@ class HealthCheck:
                 print("Warning: Got default 'no context' response after reload")
                 return False
             
-            # Should be fast since using cached data
-            if elapsed > 30:
-                print(f"Warning: Reload query slow ({elapsed:.1f}s, expected <30s)")
+            # Store timing
+            self.results["timings"]["reload"] = elapsed
+            
+            # Reload should be much faster than initial insert
+            insert_time = self.results["timings"].get("insert", 300)
+            if elapsed > insert_time * 0.3:  # Should be <30% of insert time
+                print(f"Warning: Reload slow ({elapsed:.1f}s, expected <{insert_time * 0.3:.1f}s)")
             
             if response_len < 50:
                 print(f"Warning: Reload response too short (expected >50, got {response_len})")
+                self.results["tests"]["reload"] = "failed"
                 return False
             
             print(f"✓ Reload test passed")
+            self.results["tests"]["reload"] = "passed"
             return True
             
         except Exception as e:
             print(f"Reload test failed: {e}")
+            self.results["errors"].append(f"Reload failed: {str(e)}")
+            self.results["tests"]["reload"] = "failed"
             return False
+    
+    def save_report(self):
+        """Save JSON report with test results."""
+        report_dir = Path("tests/health/reports")
+        report_dir.mkdir(parents=True, exist_ok=True)
+        
+        report_path = report_dir / "latest.json"
+        with open(report_path, "w") as f:
+            json.dump(self.results, f, indent=2)
+        
+        print(f"\n📊 Report saved to {report_path}")
     
     async def run(self) -> bool:
         """Run complete health check."""
@@ -293,6 +376,12 @@ class HealthCheck:
                 print("⚠️  Warning: Runtime exceeded 10 minutes")
             
             success = passed == total
+            self.results["status"] = "passed" if success else "failed"
+            self.results["timings"]["total"] = total_time
+            
+            # Save JSON report
+            self.save_report()
+            
             if success:
                 print("✅ Health check PASSED")
             else:
@@ -307,7 +396,8 @@ class HealthCheck:
             return False
         
         finally:
-            self.cleanup()
+            # Keep persistent directory by default
+            self.cleanup(keep_persistent=True)
 
 
 async def main():
@@ -326,6 +416,16 @@ async def main():
         help="Quick mode selection (alternative to --env)",
         default=None
     )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Clear working directory before starting"
+    )
+    parser.add_argument(
+        "--workdir",
+        default=".health/dickens",
+        help="Persistent working directory (default: .health/dickens)"
+    )
     
     args = parser.parse_args()
     
@@ -342,7 +442,7 @@ async def main():
             env_file = None
     
     # Run health check
-    health_check = HealthCheck(env_file)
+    health_check = HealthCheck(env_file, working_dir=args.workdir, fresh=args.fresh)
     success = await health_check.run()
     
     # Exit with appropriate code

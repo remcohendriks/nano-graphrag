@@ -1,0 +1,27 @@
+{
+  "timestamp": "2025-08-30T16:31:00.764397+00:00",
+  "mode": "openai",
+  "status": "passed",
+  "timings": {
+    "insert": 181.05144619941711,
+    "global_query": 24.850199937820435,
+    "local_query": 14.175631999969482,
+    "naive_query": 7.41889500617981,
+    "reload": 11.335660696029663,
+    "total": 239.0814290046692
+  },
+  "counts": {
+    "nodes": 141,
+    "edges": 164,
+    "communities": 0,
+    "chunks": 0
+  },
+  "errors": [],
+  "tests": {
+    "insert": "passed",
+    "global_query": "passed",
+    "local_query": "passed",
+    "naive_query": "passed",
+    "reload": "passed"
+  }
+}
