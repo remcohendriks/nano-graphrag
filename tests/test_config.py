@@ -206,8 +206,13 @@ class TestEntityExtractionConfig:
     
     def test_validation(self):
         """Test validation errors."""
-        with pytest.raises(ValueError, match="max_gleaning must be at least 1"):
-            EntityExtractionConfig(max_gleaning=0)
+        # max_gleaning=0 is now allowed for speed
+        config = EntityExtractionConfig(max_gleaning=0)
+        assert config.max_gleaning == 0  # Should pass
+        
+        # Test negative values still raise errors
+        with pytest.raises(ValueError, match="max_gleaning must be non-negative"):
+            EntityExtractionConfig(max_gleaning=-1)
         
         with pytest.raises(ValueError, match="summary_max_tokens must be positive"):
             EntityExtractionConfig(summary_max_tokens=-1)

@@ -5,22 +5,18 @@ import networkx as nx
 import numpy as np
 import asyncio
 import json
+from pathlib import Path
 from nano_graphrag import GraphRAG
+from nano_graphrag.config import GraphRAGConfig, StorageConfig
 from nano_graphrag._storage import NetworkXStorage
 from nano_graphrag._utils import wrap_embedding_func_with_attrs
-
-WORKING_DIR = "./tests/nano_graphrag_cache_networkx_storage_test"
+from unittest.mock import patch
 
 
 @pytest.fixture(scope="function")
-def setup_teardown():
-    if os.path.exists(WORKING_DIR):
-        shutil.rmtree(WORKING_DIR)
-    os.mkdir(WORKING_DIR)
-    
-    yield
-    
-    shutil.rmtree(WORKING_DIR)
+def temp_dir(tmp_path):
+    """Use pytest's tmp_path for temporary directories."""
+    return str(tmp_path)
 
 
 @wrap_embedding_func_with_attrs(embedding_dim=384, max_token_size=8192)
@@ -29,11 +25,22 @@ async def mock_embedding(texts: list[str]) -> np.ndarray:
 
 
 @pytest.fixture
-def networkx_storage(setup_teardown):
-    rag = GraphRAG(working_dir=WORKING_DIR, embedding_func=mock_embedding)
+def networkx_storage(temp_dir):
+    """Create NetworkXStorage with proper config."""
+    # Create minimal config dict for storage
+    global_config = {
+        "working_dir": temp_dir,
+        "embedding_func": mock_embedding,
+        "embedding_batch_num": 32,
+        "embedding_func_max_async": 16,
+    }
+    
+    # Ensure the directory exists
+    Path(temp_dir).mkdir(parents=True, exist_ok=True)
+    
     return NetworkXStorage(
         namespace="test",
-        global_config=rag.__dict__,
+        global_config=global_config,
     )
 
 
@@ -208,11 +215,18 @@ async def test_leiden_clustering_hierarchical_structure(networkx_storage, algori
 
 
 @pytest.mark.asyncio
-async def test_persistence(setup_teardown):
-    rag = GraphRAG(working_dir=WORKING_DIR, embedding_func=mock_embedding)
+async def test_persistence(temp_dir):
+    """Test storage persistence with proper mocking."""
+    # Create storage with config
+    global_config = {
+        "working_dir": temp_dir,
+        "embedding_func": mock_embedding,
+        "embedding_batch_num": 32,
+        "embedding_func_max_async": 16,
+    }
     initial_storage = NetworkXStorage(
         namespace="test_persistence",
-        global_config=rag.__dict__,
+        global_config=global_config,
     )
     
     await initial_storage.upsert_node("node1", {"attr": "value"})
@@ -223,7 +237,7 @@ async def test_persistence(setup_teardown):
     
     new_storage = NetworkXStorage(
         namespace="test_persistence",
-        global_config=rag.__dict__,
+        global_config=global_config,
     )
     
     assert await new_storage.has_node("node1")

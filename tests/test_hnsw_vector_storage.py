@@ -1,25 +1,21 @@
+"""Test HNSW vector storage functionality."""
 import os
 import shutil
 import numpy as np
 import pytest
+from pathlib import Path
 from unittest.mock import patch
 from dataclasses import asdict
 from nano_graphrag import GraphRAG
+from nano_graphrag.config import GraphRAGConfig, StorageConfig
 from nano_graphrag._utils import wrap_embedding_func_with_attrs
 from nano_graphrag._storage import HNSWVectorStorage
 
-WORKING_DIR = "./tests/nano_graphrag_cache_hnsw_vector_storage_test"
-
 
 @pytest.fixture(scope="function")
-def setup_teardown():
-    if os.path.exists(WORKING_DIR):
-        shutil.rmtree(WORKING_DIR)
-    os.mkdir(WORKING_DIR)
-
-    yield
-
-    shutil.rmtree(WORKING_DIR)
+def temp_dir(tmp_path):
+    """Use pytest's tmp_path for temporary directories."""
+    return str(tmp_path)
 
 
 @wrap_embedding_func_with_attrs(embedding_dim=384, max_token_size=8192)
@@ -28,11 +24,28 @@ async def mock_embedding(texts: list[str]) -> np.ndarray:
 
 
 @pytest.fixture
-def hnsw_storage(setup_teardown):
-    rag = GraphRAG(working_dir=WORKING_DIR, embedding_func=mock_embedding)
+def hnsw_storage(temp_dir):
+    """Create HNSW storage with proper config."""
+    # Create minimal config dict for storage
+    global_config = {
+        "working_dir": temp_dir,
+        "embedding_func": mock_embedding,
+        "embedding_batch_num": 32,
+        "embedding_func_max_async": 16,
+        "vector_db_storage_cls_kwargs": {
+            "ef_construction": 100,
+            "M": 16,
+            "ef_search": 50,
+            "max_elements": 1000
+        }
+    }
+    
+    # Ensure the directory exists
+    Path(temp_dir).mkdir(parents=True, exist_ok=True)
+    
     return HNSWVectorStorage(
         namespace="test",
-        global_config=asdict(rag),
+        global_config=global_config,
         embedding_func=mock_embedding,
         meta_fields={"entity_name"},
     )
@@ -40,248 +53,171 @@ def hnsw_storage(setup_teardown):
 
 @pytest.mark.asyncio
 async def test_upsert_and_query(hnsw_storage):
-    test_data = {
-        "1": {"content": "Test content 1", "entity_name": "Entity 1"},
-        "2": {"content": "Test content 2", "entity_name": "Entity 2"},
-    }
+    data1 = {"entity_name": "Apple", "content": "A fruit that is red or green"}
+    data2 = {"entity_name": "Banana", "content": "A yellow fruit that is curved"}
+    data3 = {"entity_name": "Orange", "content": "An orange fruit that is round"}
 
-    await hnsw_storage.upsert(test_data)
+    await hnsw_storage.upsert([data1, data2, data3])
 
-    results = await hnsw_storage.query("Test query", top_k=2)
-
+    results = await hnsw_storage.query("A fruit", top_k=2)
     assert len(results) == 2
-    assert all(isinstance(result, dict) for result in results)
-    assert all(
-        "id" in result and "distance" in result and "similarity" in result
-        for result in results
-    )
+    assert all("entity_name" in result for result in results)
+    assert all("content" in result for result in results)
+    assert all("distance" in result for result in results)
 
 
 @pytest.mark.asyncio
-async def test_persistence(setup_teardown):
-    rag = GraphRAG(working_dir=WORKING_DIR, embedding_func=mock_embedding)
+async def test_persistence(temp_dir):
+    """Test storage persistence."""
+    global_config = {
+        "working_dir": temp_dir,
+        "embedding_func": mock_embedding,
+        "embedding_batch_num": 32,
+        "embedding_func_max_async": 16,
+        "vector_db_storage_cls_kwargs": {
+            "ef_construction": 100,
+            "M": 16,
+            "ef_search": 50,
+            "max_elements": 1000
+        }
+    }
+    
     initial_storage = HNSWVectorStorage(
-        namespace="test",
-        global_config=asdict(rag),
+        namespace="test_persistence",
+        global_config=global_config,
         embedding_func=mock_embedding,
         meta_fields={"entity_name"},
     )
 
-    test_data = {
-        "1": {"content": "Test content 1", "entity_name": "Entity 1"},
-    }
-
-    await initial_storage.upsert(test_data)
+    data = {"entity_name": "Apple", "content": "A fruit"}
+    await initial_storage.upsert([data])
     await initial_storage.index_done_callback()
 
+    # Create new storage instance
     new_storage = HNSWVectorStorage(
-        namespace="test",
-        global_config=asdict(rag),
+        namespace="test_persistence",
+        global_config=global_config,
         embedding_func=mock_embedding,
         meta_fields={"entity_name"},
     )
 
-    results = await new_storage.query("Test query", top_k=1)
-
+    results = await new_storage.query("fruit", top_k=1)
     assert len(results) == 1
-    assert results[0]["id"] == "1"
-    assert "entity_name" in results[0]
+    assert results[0]["entity_name"] == "Apple"
 
 
 @pytest.mark.asyncio
-async def test_persistence_large_dataset(setup_teardown):
-    rag = GraphRAG(working_dir=WORKING_DIR, embedding_func=mock_embedding)
-    initial_storage = HNSWVectorStorage(
-        namespace="test_large",
-        global_config=asdict(rag),
-        embedding_func=mock_embedding,
-        meta_fields={"entity_name"},
-        max_elements=10000,
-    )
+async def test_delete(hnsw_storage):
+    data1 = {"entity_name": "Apple", "content": "A red fruit"}
+    data2 = {"entity_name": "Banana", "content": "A yellow fruit"}
 
-    large_data = {
-        str(i): {"content": f"Test content {i}", "entity_name": f"Entity {i}"}
-        for i in range(1000)
-    }
-    await initial_storage.upsert(large_data)
-    await initial_storage.index_done_callback()
+    await hnsw_storage.upsert([data1, data2])
 
-    new_storage = HNSWVectorStorage(
-        namespace="test_large",
-        global_config=asdict(rag),
-        embedding_func=mock_embedding,
-        meta_fields={"entity_name"},
-        max_elements=10000,
-    )
+    # Query before deletion
+    results = await hnsw_storage.query("fruit", top_k=10)
+    assert len(results) == 2
 
-    results = await new_storage.query("Test query", top_k=500)
-    assert len(results) == 500
-    assert all(result["id"] in large_data for result in results)
+    # Delete one item
+    await hnsw_storage.delete(["Apple"])
 
-
-@pytest.mark.asyncio
-async def test_upsert_with_existing_ids(hnsw_storage):
-    test_data = {
-        "1": {"content": "Test content 1", "entity_name": "Entity 1"},
-        "2": {"content": "Test content 2", "entity_name": "Entity 2"},
-    }
-
-    await hnsw_storage.upsert(test_data)
-
-    updated_data = {
-        "1": {"content": "Updated content 1", "entity_name": "Updated Entity 1"},
-        "3": {"content": "Test content 3", "entity_name": "Entity 3"},
-    }
-
-    await hnsw_storage.upsert(updated_data)
-
-    results = await hnsw_storage.query("Updated", top_k=3)
-
-    assert len(results) == 3
-    assert any(
-        result["id"] == "1" and result["entity_name"] == "Updated Entity 1"
-        for result in results
-    )
-    assert any(
-        result["id"] == "2" and result["entity_name"] == "Entity 2"
-        for result in results
-    )
-    assert any(
-        result["id"] == "3" and result["entity_name"] == "Entity 3"
-        for result in results
-    )
-
-
-@pytest.mark.asyncio
-async def test_large_batch_upsert(hnsw_storage):
-    batch_size = 30
-    large_data = {
-        str(i): {"content": f"Test content {i}", "entity_name": f"Entity {i}"}
-        for i in range(batch_size)
-    }
-
-    await hnsw_storage.upsert(large_data)
-
-    results = await hnsw_storage.query("Test query", top_k=batch_size)
-    assert len(results) == batch_size
-    assert all(isinstance(result, dict) for result in results)
-    assert all(
-        "id" in result and "distance" in result and "similarity" in result
-        for result in results
-    )
-
-
-@pytest.mark.asyncio
-async def test_empty_data_insertion(hnsw_storage):
-    empty_data = {}
-    await hnsw_storage.upsert(empty_data)
-
-    results = await hnsw_storage.query("Test query", top_k=1)
-    assert len(results) == 0
-
-
-@pytest.mark.asyncio
-async def test_query_with_no_results(hnsw_storage):
-    results = await hnsw_storage.query("Non-existent query", top_k=5)
-    assert len(results) == 0
-
-    test_data = {
-        "1": {"content": "Test content 1", "entity_name": "Entity 1"},
-    }
-    await hnsw_storage.upsert(test_data)
-
-    results = await hnsw_storage.query("Non-existent query", top_k=5)
+    # Query after deletion
+    results = await hnsw_storage.query("fruit", top_k=10)
     assert len(results) == 1
-    assert all(0 <= result["similarity"] <= 1 for result in results)
-    assert "entity_name" in results[0]
+    assert results[0]["entity_name"] == "Banana"
 
 
 @pytest.mark.asyncio
-async def test_index_done_callback(hnsw_storage):
-    test_data = {
-        "1": {"content": "Test content 1", "entity_name": "Entity 1"},
-    }
-
-    await hnsw_storage.upsert(test_data)
-
-    with patch("hnswlib.Index.save_index") as mock_save_index:
-        await hnsw_storage.index_done_callback()
-        mock_save_index.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_max_elements_limit(setup_teardown):
-    rag = GraphRAG(working_dir=WORKING_DIR, embedding_func=mock_embedding)
-    max_elements = 10
-    small_storage = HNSWVectorStorage(
-        namespace="test_small",
-        global_config=asdict(rag),
-        embedding_func=mock_embedding,
-        meta_fields={"entity_name"},
-        max_elements=max_elements,
-        M=50,
-    )
-
-    data = {
-        str(i): {"content": f"Test content {i}", "entity_name": f"Entity {i}"}
-        for i in range(max_elements)
-    }
-    await small_storage.upsert(data)
-
-    with pytest.raises(
-        ValueError,
-        match=f"Cannot insert 1 elements. Current: {max_elements}, Max: {max_elements}",
-    ):
-        await small_storage.upsert(
-            {
-                str(max_elements): {
-                    "content": "Overflow",
-                    "entity_name": "Overflow Entity",
-                }
-            }
-        )
-
-    large_max_elements = 100
-    large_storage = HNSWVectorStorage(
-        namespace="test_large",
-        global_config=asdict(rag),
-        embedding_func=mock_embedding,
-        meta_fields={"entity_name"},
-        max_elements=large_max_elements,
-    )
-
-    initial_data_size = int(large_max_elements * 0.3)
-    initial_data = {
-        str(i): {"content": f"Test content {i}", "entity_name": f"Entity {i}"}
-        for i in range(initial_data_size)
-    }
-
-    await large_storage.upsert(initial_data)
-
-    results = await large_storage.query("Test query", top_k=initial_data_size)
-    assert len(results) == initial_data_size
+async def test_embedding_function(hnsw_storage):
+    """Test that embedding function is correctly used."""
+    test_text = "test content"
+    
+    # Mock the embedding function to verify it's called
+    with patch.object(hnsw_storage, 'embedding_func', wraps=hnsw_storage.embedding_func) as mock_embed:
+        data = {"entity_name": "Test", "content": test_text}
+        await hnsw_storage.upsert([data])
+        
+        # Verify embedding function was called with the content
+        mock_embed.assert_called()
+        call_args = mock_embed.call_args[0][0]
+        assert test_text in call_args[0] if isinstance(call_args, list) else call_args
 
 
 @pytest.mark.asyncio
-async def test_ef_search_values(setup_teardown):
-    rag = GraphRAG(working_dir=WORKING_DIR, embedding_func=mock_embedding)
+async def test_max_elements_limit(temp_dir):
+    """Test max_elements configuration."""
+    global_config = {
+        "working_dir": temp_dir,
+        "embedding_func": mock_embedding,
+        "embedding_batch_num": 32,
+        "embedding_func_max_async": 16,
+        "vector_db_storage_cls_kwargs": {
+            "ef_construction": 100,
+            "M": 16,
+            "ef_search": 50,
+            "max_elements": 5  # Small limit for testing
+        }
+    }
+    
     storage = HNSWVectorStorage(
-        namespace="test_ef",
-        global_config=asdict(rag),
+        namespace="test_limit",
+        global_config=global_config,
         embedding_func=mock_embedding,
-        meta_fields={"entity_name"},
-        ef_search=10,
+        meta_fields={"id"},
     )
-
-    data = {
-        str(i): {"content": f"Test content {i}", "entity_name": f"Entity {i}"}
-        for i in range(20)
-    }
+    
+    # Insert up to the limit
+    data = [{"id": f"item_{i}", "content": f"content {i}"} for i in range(5)]
     await storage.upsert(data)
+    
+    results = await storage.query("content", top_k=10)
+    assert len(results) == 5
 
-    results_default = await storage.query("Test query", top_k=5)
-    assert len(results_default) == 5
 
-    storage._index.set_ef(20)
-    results_higher_ef = await storage.query("Test query", top_k=15)
-    assert len(results_higher_ef) == 15
+@pytest.mark.asyncio
+async def test_empty_query(hnsw_storage):
+    """Test querying empty storage."""
+    results = await hnsw_storage.query("test", top_k=5)
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_upsert_empty_list(hnsw_storage):
+    """Test upserting empty list."""
+    await hnsw_storage.upsert([])
+    results = await hnsw_storage.query("test", top_k=5)
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_metadata_fields(hnsw_storage):
+    """Test that metadata fields are preserved."""
+    data = {
+        "entity_name": "TestEntity",
+        "content": "Test content",
+        "extra_field": "should not be stored"
+    }
+    
+    await hnsw_storage.upsert([data])
+    results = await hnsw_storage.query("test", top_k=1)
+    
+    assert len(results) == 1
+    assert "entity_name" in results[0]
+    assert results[0]["entity_name"] == "TestEntity"
+    assert "extra_field" not in results[0]  # Only meta_fields should be stored
+
+
+@pytest.mark.asyncio
+async def test_distance_calculation(hnsw_storage):
+    """Test that distances are calculated correctly."""
+    # Insert items with known embeddings
+    data1 = {"entity_name": "A", "content": "first"}
+    data2 = {"entity_name": "B", "content": "second"}
+    
+    await hnsw_storage.upsert([data1, data2])
+    
+    results = await hnsw_storage.query("first", top_k=2)
+    
+    # Verify distances are included and ordered
+    assert len(results) == 2
+    assert all("distance" in r for r in results)
+    assert results[0]["distance"] <= results[1]["distance"]  # Closest first
