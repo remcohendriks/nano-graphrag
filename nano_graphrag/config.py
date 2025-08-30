@@ -15,6 +15,7 @@ class LLMConfig:
     max_concurrent: int = 16
     cache_enabled: bool = True
     temperature: float = 0.0
+    request_timeout: float = 30.0
     
     @classmethod
     def from_env(cls) -> 'LLMConfig':
@@ -25,7 +26,8 @@ class LLMConfig:
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "32768")),
             max_concurrent=int(os.getenv("LLM_MAX_CONCURRENT", "16")),
             cache_enabled=os.getenv("LLM_CACHE_ENABLED", "true").lower() == "true",
-            temperature=float(os.getenv("LLM_TEMPERATURE", "0.0"))
+            temperature=float(os.getenv("LLM_TEMPERATURE", "0.0")),
+            request_timeout=float(os.getenv("LLM_REQUEST_TIMEOUT", "30.0"))
         )
     
     def __post_init__(self):
@@ -161,8 +163,8 @@ class EntityExtractionConfig:
     
     def __post_init__(self):
         """Validate configuration."""
-        if self.max_gleaning < 1:
-            raise ValueError(f"max_gleaning must be at least 1, got {self.max_gleaning}")
+        if self.max_gleaning < 0:
+            raise ValueError(f"max_gleaning must be non-negative, got {self.max_gleaning}")
         if self.summary_max_tokens <= 0:
             raise ValueError(f"summary_max_tokens must be positive, got {self.summary_max_tokens}")
 

@@ -137,8 +137,30 @@ class OpenAIProvider(BaseLLMProvider):
         messages = self._build_messages(prompt, system_prompt, history)
         api_params = self._translate_params(params or {})
         
+        # Handle max_tokens in kwargs
+        if "max_tokens" in kwargs:
+            max_tokens = kwargs.pop("max_tokens")
+            if "gpt-5" in self.model:
+                kwargs["max_completion_tokens"] = max_tokens
+            else:
+                # For non-GPT-5 models (including LMStudio), use max_tokens directly
+                kwargs["max_tokens"] = max_tokens
+        
         # Merge kwargs but api_params take precedence
         final_params = {**kwargs, **api_params}
+        
+        # Add reasoning_effort for GPT-5 models to get faster responses
+        if "gpt-5" in self.model and "reasoning_effort" not in final_params:
+            final_params["reasoning_effort"] = "minimal"
+        
+        # Ensure we have enough tokens for GPT-5 models
+        if "gpt-5" in self.model:
+            if "max_completion_tokens" not in final_params and "max_tokens" not in final_params:
+                final_params["max_completion_tokens"] = 2000  # Default for GPT-5
+        else:
+            # For non-GPT-5 models, ensure max_tokens is set to prevent context overflow
+            if "max_tokens" not in final_params:
+                final_params["max_tokens"] = 2000  # Default for other models
         
         async def _make_request():
             return await asyncio.wait_for(
@@ -157,8 +179,16 @@ class OpenAIProvider(BaseLLMProvider):
         except Exception as e:
             raise self._translate_error(e)
         
+        # Handle potentially None content from GPT-5 models
+        content = response.choices[0].message.content
+        if content is None:
+            content = ""
+            # Log warning for debugging
+            import logging
+            logging.warning(f"Got None content from {self.model}, finish_reason: {response.choices[0].finish_reason}")
+        
         return CompletionResponse(
-            text=response.choices[0].message.content,
+            text=content,
             finish_reason=response.choices[0].finish_reason,
             usage={
                 "prompt_tokens": response.usage.prompt_tokens,
@@ -220,13 +250,16 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
         self,
         model: str = "text-embedding-3-small",
         api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         embedding_dim: int = 1536,
         **kwargs
     ):
         super().__init__(model, api_key, **kwargs)
         self.embedding_dim = embedding_dim
+        self.base_url = base_url
         self.client = AsyncOpenAI(
             api_key=self.api_key,
+            base_url=self.base_url,
             timeout=self.request_timeout,
             max_retries=0  # We handle retries ourselves
         )

@@ -1,5 +1,6 @@
 """LLM Provider implementations."""
 
+import os
 from typing import Optional, Any
 from ..base import BaseLLMProvider, BaseEmbeddingProvider
 
@@ -46,7 +47,12 @@ def get_llm_provider(
         LLM provider instance
     """
     if provider_type == "openai":
-        return OpenAIProvider(model=model)
+        # Use LLM_BASE_URL if set, otherwise fall back to OPENAI_BASE_URL
+        base_url = os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+        request_timeout = float(os.getenv("LLM_REQUEST_TIMEOUT", "30.0")) if config else 30.0
+        if config and hasattr(config, 'request_timeout'):
+            request_timeout = config.request_timeout
+        return OpenAIProvider(model=model, base_url=base_url, request_timeout=request_timeout)
     elif provider_type == "azure":
         return AzureOpenAIProvider(model=model)
     elif provider_type == "bedrock":
@@ -73,7 +79,12 @@ def get_embedding_provider(
         Embedding provider instance
     """
     if provider_type == "openai":
-        return OpenAIEmbeddingProvider(model=model)
+        # Use EMBEDDING_BASE_URL if set, otherwise default to OpenAI's API
+        # This prevents LMStudio's base URL from affecting embeddings
+        base_url = os.getenv("EMBEDDING_BASE_URL")
+        # If no embedding base URL is set, use None to default to OpenAI
+        # Don't fall back to OPENAI_BASE_URL as that would redirect embeddings
+        return OpenAIEmbeddingProvider(model=model, base_url=base_url)
     elif provider_type == "azure":
         return AzureOpenAIEmbeddingProvider(model=model)
     elif provider_type == "bedrock":
