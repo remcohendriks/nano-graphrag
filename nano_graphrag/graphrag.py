@@ -87,9 +87,33 @@ class GraphRAG:
         )
         
         # Create function wrappers for compatibility
-        self.best_model_func = self.llm_provider.complete
-        self.cheap_model_func = self.llm_provider.complete  # Can use different model later
-        self.embedding_func = self.embedding_provider.embed
+        # These need to handle the hashing_kv parameter that will be added by _init_functions
+        async def best_model_wrapper(prompt, system_prompt=None, history=None, **kwargs):
+            hashing_kv = kwargs.pop("hashing_kv", None)
+            return await self.llm_provider.complete_with_cache(
+                prompt, system_prompt, history, hashing_kv=hashing_kv, **kwargs
+            )
+        
+        async def cheap_model_wrapper(prompt, system_prompt=None, history=None, **kwargs):
+            hashing_kv = kwargs.pop("hashing_kv", None)
+            return await self.llm_provider.complete_with_cache(
+                prompt, system_prompt, history, hashing_kv=hashing_kv, **kwargs
+            )
+        
+        self.best_model_func = best_model_wrapper
+        self.cheap_model_func = cheap_model_wrapper
+        
+        # Create embedding wrapper that returns np.ndarray directly
+        async def embedding_wrapper(texts):
+            response = await self.embedding_provider.embed(texts)
+            return response["embeddings"]
+        
+        # Wrap embedding function with attributes for compatibility
+        self.embedding_func = EmbeddingFunc(
+            embedding_dim=self.config.embedding.dimension,
+            max_token_size=8192,  # Default for OpenAI
+            func=embedding_wrapper
+        )
     
     def _init_storage(self):
         """Initialize storage backends using factory pattern."""
@@ -222,50 +246,19 @@ class GraphRAG:
                 
             # Extract entities if local query is enabled
             if self.config.query.enable_local:
-                entities = await extract_entities_from_chunks(
-                    chunks,
-                    self.cheap_model_func,
+                chunk_map = {}
+                for i, chunk in enumerate(chunks):
+                    chunk_id = compute_mdhash_id(chunk["content"], prefix="chunk-")
+                    chunk_map[chunk_id] = chunk
+                
+                await extract_entities(
+                    chunk_map,
+                    self.chunk_entity_relation_graph,
+                    self.entities_vdb,
                     self.tokenizer_wrapper,
-                    self.config.entity_extraction.max_gleaning,
-                    self.config.entity_extraction.summary_max_tokens,
-                    self.convert_response_to_json_func
+                    self._global_config(),
+                    using_amazon_bedrock=False
                 )
-                
-                # Store entities in graph using batch upsert with proper shapes
-                if entities["nodes"]:
-                    node_items = [
-                        (
-                            node["id"],
-                            {
-                                "entity_type": node.get("type", "UNKNOWN").upper(),
-                                "description": node.get("description", ""),
-                                "source_id": doc_id,
-                                "name": node.get("name", node["id"]),
-                            },
-                        )
-                        for node in entities["nodes"]
-                    ]
-                    await self.chunk_entity_relation_graph.upsert_nodes_batch(node_items)
-                
-                if entities["edges"]:
-                    edge_items = []
-                    for edge in entities["edges"]:
-                        src = edge.get("source") or edge.get("from")
-                        tgt = edge.get("target") or edge.get("to")
-                        if src and tgt:
-                            edge_items.append(
-                                (
-                                    src,
-                                    tgt,
-                                    {
-                                        "weight": 1.0,
-                                        "description": edge.get("description", ""),
-                                        "source_id": doc_id,
-                                    },
-                                )
-                            )
-                    if edge_items:
-                        await self.chunk_entity_relation_graph.upsert_edges_batch(edge_items)
             
             # Store chunks in vector DB if naive RAG is enabled
             if self.config.query.enable_naive_rag and self.chunks_vdb:
@@ -318,13 +311,26 @@ class GraphRAG:
                 try:
                     node_data = await self.chunk_entity_relation_graph.get_node(node_id)
                     if node_data:
-                        entity_dict[node_id] = {
-                            "content": node_data.get("description", ""),
-                            "entity_name": node_data.get("name", node_id),
-                            "entity_type": node_data.get("entity_type", "UNKNOWN"),
-                        }
-                except:
+                        # Get description and ensure it's not empty for embedding
+                        description = node_data.get("description", "").strip()
+                        if not description:
+                            # Use entity name and type as fallback content
+                            entity_name = node_data.get("name", node_id).strip() if node_data.get("name") else node_id
+                            entity_type = node_data.get("entity_type", "UNKNOWN")
+                            description = f"{entity_name} ({entity_type})"
+                        
+                        # Final check to ensure description is not empty
+                        if description and description != " (UNKNOWN)":
+                            entity_dict[node_id] = {
+                                "content": description,
+                                "entity_name": node_data.get("name", node_id),
+                                "entity_type": node_data.get("entity_type", "UNKNOWN"),
+                            }
+                        else:
+                            logger.debug(f"Skipping entity {node_id} with empty description")
+                except Exception as e:
                     # Node might not exist, skip it
+                    logger.debug(f"Could not get node {node_id}: {e}")
                     continue
             
             if entity_dict:

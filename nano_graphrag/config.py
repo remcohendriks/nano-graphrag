@@ -161,8 +161,8 @@ class EntityExtractionConfig:
     
     def __post_init__(self):
         """Validate configuration."""
-        if self.max_gleaning < 1:
-            raise ValueError(f"max_gleaning must be at least 1, got {self.max_gleaning}")
+        if self.max_gleaning < 0:
+            raise ValueError(f"max_gleaning must be non-negative, got {self.max_gleaning}")
         if self.summary_max_tokens <= 0:
             raise ValueError(f"summary_max_tokens must be positive, got {self.summary_max_tokens}")
 

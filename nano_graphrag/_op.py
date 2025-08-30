@@ -315,6 +315,8 @@ async def extract_entities(
         final_result = await use_llm_func(hint_prompt)
         if isinstance(final_result, list):
             final_result = final_result[0]["text"]
+        
+        print(f"DEBUG: Chunk {chunk_key} - LLM returned {len(final_result) if final_result else 0} chars")
 
         history = pack_user_ass_to_openai_messages(hint_prompt, final_result, using_amazon_bedrock)
         for now_glean_index in range(entity_extract_max_gleaning):
@@ -387,6 +389,8 @@ async def extract_entities(
         for k, v in m_edges.items():
             # it's undirected graph
             maybe_edges[tuple(sorted(k))].extend(v)
+    
+    print(f"DEBUG: Extracted {len(maybe_nodes)} unique entities and {len(maybe_edges)} unique relationships")
     all_entities_data = await asyncio.gather(
         *[
             _merge_nodes_then_upsert(k, v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
@@ -752,6 +756,7 @@ async def _find_most_related_text_unit_from_entities(
     knowledge_graph_inst: BaseGraphStorage,
     tokenizer_wrapper,
 ):
+    
     text_units = [
         split_string_by_multi_markers(dp["source_id"], [GRAPH_FIELD_SEP])
         for dp in node_datas
@@ -764,10 +769,11 @@ async def _find_most_related_text_unit_from_entities(
         all_one_hop_nodes.update([e[1] for e in this_edges])
     all_one_hop_nodes = list(all_one_hop_nodes)
     all_one_hop_nodes_data = await knowledge_graph_inst.get_nodes_batch(all_one_hop_nodes)
+    
     all_one_hop_text_units_lookup = {
-        k: set(split_string_by_multi_markers(v["source_id"], [GRAPH_FIELD_SEP]))
+        k: set(split_string_by_multi_markers(v.get("source_id", ""), [GRAPH_FIELD_SEP]))
         for k, v in zip(all_one_hop_nodes, all_one_hop_nodes_data)
-        if v is not None
+        if v is not None and v.get("source_id")
     }
     all_text_units_lookup = {}
     for index, (this_text_units, this_edges) in enumerate(zip(text_units, edges)):
@@ -791,12 +797,14 @@ async def _find_most_related_text_unit_from_entities(
     all_text_units = [
         {"id": k, **v} for k, v in all_text_units_lookup.items() if v is not None
     ]
+    all_text_units = [unit for unit in all_text_units if unit and unit.get("data")]
+    
     all_text_units = sorted(
         all_text_units, key=lambda x: (x["order"], -x["relation_counts"])
     )
     all_text_units = truncate_list_by_token_size(
         all_text_units,
-        key=lambda x: x["data"]["content"],
+        key=lambda x: x["data"]["content"] if x and x.get("data") else "",
         max_token_size=query_param.local_max_token_for_text_unit,
         tokenizer_wrapper=tokenizer_wrapper, # 传入 wrapper
     )
@@ -1217,34 +1225,61 @@ async def extract_entities_from_chunks(
             **context_base
         )
         
+        logger.debug(f"Processing chunk for entity extraction, max_gleaning={max_gleaning}")
+        
+        # Always do at least one extraction pass
+        response = await model_func(
+            entity_extract_prompt.format(**context)
+        )
+        
+        
+        # Then do additional gleaning passes if configured
         for glean_index in range(max_gleaning):
-            if glean_index == 0:
-                response = await model_func(
-                    entity_extract_prompt.format(**context)
-                )
-            else:
-                context["input_text"] = response
-                response = await model_func(
-                    PROMPTS.get("entiti_continue_extraction", PROMPTS.get("entity_extraction", "")).format(**context)
-                )
+            context["input_text"] = response
+            response = await model_func(
+                PROMPTS.get("entiti_continue_extraction", PROMPTS.get("entity_extraction", "")).format(**context)
+            )
+        
+        # Parse entities and relationships from delimiter format response
+        # The LLM returns format like: ("entity"<|>NAME<|>TYPE<|>DESC)##("relationship"<|>...)
+        records = split_string_by_multi_markers(
+            response,
+            [context_base["record_delimiter"], context_base["completion_delimiter"]],
+        )
+        
+        # Filter out empty records
+        records = [r for r in records if r.strip()]
+        
+        for record in records:
+            if not record.strip():
+                continue
+            # Extract content between parentheses
+            match = re.search(r'\((.*)\)', record)
+            if match is None:
+                continue
+            record_content = match.group(1)
+            # Split by tuple delimiter
+            attributes = split_string_by_multi_markers(
+                record_content, [context_base["tuple_delimiter"]]
+            )
             
-            # Parse entities and relationships from response
-            try:
-                data = to_json_func(response)
-                if "entities" in data:
-                    for entity in data["entities"]:
-                        if entity["name"] not in all_entities:
-                            all_entities[entity["name"]] = entity
-                        else:
-                            # Merge descriptions
-                            existing = all_entities[entity["name"]]
-                            existing["description"] = f"{existing['description']} {entity.get('description', '')}"
-                
-                if "relationships" in data:
-                    all_relationships.extend(data["relationships"])
-            except:
-                # If parsing fails, try to extract from text
-                pass
+            if len(attributes) >= 4 and attributes[0] == '"entity"':
+                entity_name = clean_str(attributes[1].upper())
+                if entity_name and entity_name not in all_entities:
+                    all_entities[entity_name] = {
+                        "name": entity_name,
+                        "type": clean_str(attributes[2].upper()),
+                        "description": clean_str(attributes[3])
+                    }
+            elif len(attributes) >= 4 and attributes[0] == '"relationship"':
+                src = clean_str(attributes[1].upper())
+                tgt = clean_str(attributes[2].upper())
+                if src and tgt:
+                    all_relationships.append({
+                        "source": src,
+                        "target": tgt,
+                        "description": clean_str(attributes[3])
+                    })
     
     # Convert to nodes and edges format
     nodes = [
@@ -1268,6 +1303,7 @@ async def extract_entities_from_chunks(
         if rel.get("source") or rel.get("from")
     ]
     
+    logger.debug(f"Entity extraction completed - {len(nodes)} nodes, {len(edges)} edges")
     return {"nodes": nodes, "edges": edges}
 
 

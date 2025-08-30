@@ -197,9 +197,14 @@ class NetworkXStorage(BaseGraphStorage):
                 results[cluster_key]["edges"].update(
                     [tuple(sorted(e)) for e in this_node_edges]
                 )
-                results[cluster_key]["chunk_ids"].update(
-                    node_data["source_id"].split(GRAPH_FIELD_SEP)
-                )
+                # Handle nodes that might not have source_id (e.g., from clustering)
+                if "source_id" in node_data:
+                    results[cluster_key]["chunk_ids"].update(
+                        node_data["source_id"].split(GRAPH_FIELD_SEP)
+                    )
+                elif "id" in node_data:
+                    # Fallback to node id if source_id is missing
+                    results[cluster_key]["chunk_ids"].add(node_data["id"])
                 max_num_ids = max(max_num_ids, len(results[cluster_key]["chunk_ids"]))
 
         ordered_levels = sorted(levels.keys())
@@ -224,13 +229,36 @@ class NetworkXStorage(BaseGraphStorage):
         return dict(results)
 
     def _cluster_data_to_subgraphs(self, cluster_data: dict[str, list[dict[str, str]]]):
+        # Create a mapping from uppercase to original node IDs
+        # since stable_largest_connected_component uppercases node IDs
+        uppercase_to_original = {}
+        for original_id in self._graph.nodes():
+            uppercase_id = html.unescape(original_id.upper().strip())
+            uppercase_to_original[uppercase_id] = original_id
+        
         for node_id, clusters in cluster_data.items():
-            self._graph.nodes[node_id]["clusters"] = json.dumps(clusters)
+            # Map the uppercase node ID back to the original node ID
+            original_node_id = uppercase_to_original.get(node_id, node_id)
+            if original_node_id in self._graph.nodes:
+                self._graph.nodes[original_node_id]["clusters"] = json.dumps(clusters)
 
     async def _leiden_clustering(self):
         from graspologic.partition import hierarchical_leiden
 
+        logger.debug(f"Leiden clustering - Graph has {len(self._graph.nodes())} nodes and {len(self._graph.edges())} edges")
+        
+        # Handle empty graph case
+        if len(self._graph.nodes()) == 0:
+            logger.warning("Graph is empty, skipping clustering")
+            return
+        
         graph = NetworkXStorage.stable_largest_connected_component(self._graph)
+        
+        # Check if the largest component is empty
+        if len(graph.nodes()) == 0:
+            logger.warning("No connected components found, skipping clustering")
+            return
+        
         community_mapping = hierarchical_leiden(
             graph,
             max_cluster_size=self.global_config["max_graph_cluster_size"],
