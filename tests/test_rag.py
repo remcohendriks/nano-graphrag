@@ -77,8 +77,9 @@ def test_insert_with_mocks(temp_working_dir, mock_providers):
         assert embedding_provider.embed.called
 
 
+@pytest.mark.asyncio
 async def test_local_query_with_mocks(temp_working_dir, mock_providers):
-    """Test local query with mocked providers."""
+    """Test local query with pre-seeded data."""
     llm_provider, embedding_provider = mock_providers
     
     with patch('nano_graphrag.llm.providers.get_llm_provider') as mock_get_llm, \
@@ -94,15 +95,25 @@ async def test_local_query_with_mocks(temp_working_dir, mock_providers):
         
         rag = GraphRAG(config=config)
         
-        # Mock query - providers will return FAKE_RESPONSE
+        # Pre-seed entities and chunks for local query
+        await rag.text_chunks.upsert({
+            "chunk1": {"content": "Test chunk content", "source_id": "doc1"}
+        })
+        await rag.entities_vdb.upsert({
+            "entity1": {"content": "Test entity", "source_id": "chunk1"}
+        })
+        
+        # Mock query - should not fail with "No available context"
         result = await rag.aquery("Test query", param=QueryParam(mode="local"))
         
-        # Should get mocked response
+        # Should get mocked response, not the failure message
+        assert "Sorry" not in result
         assert result == FAKE_RESPONSE
 
 
+@pytest.mark.asyncio
 async def test_global_query_with_mocks(temp_working_dir, mock_providers):
-    """Test global query with mocked providers."""
+    """Test global query with pre-seeded community data."""
     llm_provider, embedding_provider = mock_providers
     
     with patch('nano_graphrag.llm.providers.get_llm_provider') as mock_get_llm, \
@@ -117,13 +128,39 @@ async def test_global_query_with_mocks(temp_working_dir, mock_providers):
         
         rag = GraphRAG(config=config)
         
-        # Mock query
-        result = await rag.aquery("Test query", param=QueryParam(mode="global"))
+        # Pre-seed community reports for global query
+        await rag.community_reports.upsert({
+            'C1': {
+                'report_string': 'Test community summary',
+                'report_json': {'rating': 1.0, 'description': 'Test cluster'},
+                'level': 0,
+                'occurrence': 1.0
+            }
+        })
         
-        # Should get JSON response for global query
-        assert result == FAKE_JSON
+        # Mock community_schema to return our seeded community
+        async def fake_schema():
+            return {
+                'C1': {
+                    'level': 0,
+                    'title': 'Cluster 1',
+                    'edges': [],
+                    'nodes': ['node1'],
+                    'chunk_ids': ['chunk1'],
+                    'occurrence': 1.0,
+                    'sub_communities': []
+                }
+            }
+        
+        with patch.object(rag.chunk_entity_relation_graph, 'community_schema', AsyncMock(side_effect=fake_schema)):
+            # Mock query - should get JSON response
+            result = await rag.aquery("Test query", param=QueryParam(mode="global"))
+            
+            # Should get JSON response for global query
+            assert result == FAKE_JSON
 
 
+@pytest.mark.asyncio
 async def test_naive_query_with_mocks(temp_working_dir, mock_providers):
     """Test naive RAG query with mocked providers."""
     llm_provider, embedding_provider = mock_providers
@@ -141,9 +178,15 @@ async def test_naive_query_with_mocks(temp_working_dir, mock_providers):
         
         rag = GraphRAG(config=config)
         
-        # Insert minimal data first
-        test_text = "This is test data for naive RAG."
-        rag.insert(test_text)
+        # Pre-seed text chunks for naive query
+        await rag.text_chunks.upsert({
+            "chunk1": {"content": "This is test data for naive RAG."}
+        })
+        
+        # Pre-seed vector storage
+        await rag.chunks_vdb.upsert({
+            "chunk1": {"content": "This is test data for naive RAG."}
+        })
         
         # Mock query
         result = await rag.aquery("Test query", param=QueryParam(mode="naive"))
@@ -157,9 +200,3 @@ def test_backward_compatibility():
     # This test ensures we don't break existing code
     # Can be removed in future versions
     pass
-
-
-# Mark async tests
-pytest.mark.asyncio(test_local_query_with_mocks)
-pytest.mark.asyncio(test_global_query_with_mocks)
-pytest.mark.asyncio(test_naive_query_with_mocks)
