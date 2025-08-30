@@ -3,8 +3,10 @@
 ## Summary
 Split the monolithic `_op.py` file into focused modules for chunking, extraction, community reports, and queries to improve maintainability and testability.
 
+**UPDATE**: After NGRAF-005.5, `_op.py` still contains 1000+ lines mixing concerns. Focus on minimal refactoring - extract clear boundaries without changing logic.
+
 ## Context
-The `_op.py` file is currently 1000+ lines mixing multiple concerns. This violates single responsibility principle and makes the code hard to navigate, test, and maintain. After NGRAF-001/002/003, we have clean provider and storage abstractions, but the core operations remain entangled.
+The `_op.py` file is currently 1000+ lines mixing multiple concerns. This violates single responsibility principle and makes the code hard to navigate, test, and maintain. After NGRAF-001/002/003, we have clean provider and storage abstractions, but the core operations remain entangled. Recent changes added logging but didn't address structural issues.
 
 ## Problem
 - Single file handles chunking, entity extraction, community detection, and query operations

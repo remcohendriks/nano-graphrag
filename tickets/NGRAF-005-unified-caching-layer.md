@@ -3,6 +3,8 @@
 ## Summary
 Create a minimal, pluggable cache interface that wraps existing KV storage while maintaining current behavior and allowing optional backends.
 
+**UPDATE**: Focus on absolute minimal implementation - just a thin adapter over existing `hashing_kv` with optional TTL/metrics hooks. No new dependencies, no complex patterns.
+
 ## Context
 After NGRAF-001/002/003, caching exists via `BaseLLMProvider.complete_with_cache()` using `hashing_kv` (JsonKVStorage). This ticket provides a cleaner abstraction without invasive changes.
 

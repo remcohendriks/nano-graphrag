@@ -3,8 +3,10 @@
 ## Summary
 Clean up `GraphRAGConfig.to_dict()` by moving legacy compatibility fields to a dedicated method, maintaining backward compatibility while improving config clarity.
 
+**UPDATE**: Focus on clear separation between active config (`to_dict()`) and legacy shims (`to_legacy_dict()`). The expert correctly identified this distinction is crucial for maintainability.
+
 ## Context
-After NGRAF-002 config simplification, `GraphRAGConfig.to_dict()` contains 70+ lines mixing actual configuration with legacy compatibility fields. This makes it hard to understand what configuration actually matters versus what's there for backward compatibility.
+After NGRAF-002 config simplification, `GraphRAGConfig.to_dict()` contains 70+ lines mixing actual configuration with legacy compatibility fields. This makes it hard to understand what configuration actually matters versus what's there for backward compatibility. The current implementation makes it unclear which fields the system actually uses.
 
 ## Problem
 - `to_dict()` method conflates real config with compatibility shims

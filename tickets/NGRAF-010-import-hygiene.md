@@ -3,15 +3,18 @@
 ## Summary
 Move heavy dependencies to lazy imports inside functions to reduce import time and memory usage for users who don't use all features.
 
+**UPDATE**: The expert identified specific heavy dependencies: DSPy, Neo4j, graspologic. These should be lazy-loaded with actionable ImportError messages. Also note: DSPy package name should be "dspy" not "dspy-ai" per latest docs.
+
 ## Context
-The codebase imports heavy libraries (dspy-ai, neo4j, hnswlib) at module level even when not used. This increases startup time and memory footprint unnecessarily. Some imports also risk circular dependencies.
+The codebase imports heavy libraries (dspy, neo4j, hnswlib, graspologic) at module level even when not used. This increases startup time and memory footprint unnecessarily. Some imports also risk circular dependencies.
 
 ## Problem
-- Heavy libraries imported even when not used (dspy-ai is 100+ MB)
-- Slow import times affect CLI tools and serverless functions
+- Heavy libraries imported even when not used (DSPy/graspologic are large)
+- Slow import times affect CLI tools and serverless functions (cold start impact)
 - Unnecessary memory usage for unused features
 - Potential circular import risks at module level
 - All backends loaded even when only one is used
+- DSPy package name inconsistency ("dspy" vs "dspy-ai")
 
 ## Technical Solution
 
