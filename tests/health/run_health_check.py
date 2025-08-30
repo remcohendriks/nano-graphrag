@@ -58,7 +58,8 @@ class HealthCheck:
         # Initialize results tracking
         self.results: Dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "mode": os.environ.get("LLM_PROVIDER", "openai"),
+            "provider": os.environ.get("LLM_PROVIDER", "openai"),
+            "model": os.environ.get("LLM_MODEL", "unknown"),
             "status": "running",
             "timings": {},
             "counts": {
@@ -182,6 +183,23 @@ class HealthCheck:
             # Count graph elements
             nodes, edges = self.count_graph_elements()
             print(f"Graph statistics: {nodes} nodes, {edges} edges")
+            
+            # Count communities and chunks for metrics
+            try:
+                with open(self.working_dir / "kv_store_community_reports.json") as f:
+                    reports = json.load(f)
+                    self.results["counts"]["communities"] = len(reports)
+                    print(f"Communities: {len(reports)}")
+            except Exception:
+                self.results["counts"]["communities"] = 0
+            
+            try:
+                with open(self.working_dir / "kv_store_text_chunks.json") as f:
+                    chunks = json.load(f)
+                    self.results["counts"]["chunks"] = len(chunks)
+                    print(f"Chunks: {len(chunks)}")
+            except Exception:
+                self.results["counts"]["chunks"] = 0
             
             elapsed = time.time() - start_time
             print(f"Insert completed in {elapsed:.1f} seconds")
@@ -320,15 +338,37 @@ class HealthCheck:
             return False
     
     def save_report(self):
-        """Save JSON report with test results."""
+        """Save JSON report with test results, preserving history."""
         report_dir = Path("tests/health/reports")
         report_dir.mkdir(parents=True, exist_ok=True)
-        
         report_path = report_dir / "latest.json"
-        with open(report_path, "w") as f:
-            json.dump(self.results, f, indent=2)
         
-        print(f"\n📊 Report saved to {report_path}")
+        # Load existing history
+        history = []
+        if report_path.exists():
+            try:
+                with open(report_path) as f:
+                    existing = json.load(f)
+                    # Handle both old format (single dict) and new format (array)
+                    if isinstance(existing, dict):
+                        history = [existing]
+                    else:
+                        history = existing
+            except Exception as e:
+                print(f"Warning: Could not load existing history: {e}")
+        
+        # Add current run at the beginning
+        history.insert(0, self.results)
+        
+        # Keep only last 100 runs to prevent unbounded growth
+        MAX_HISTORY = 100
+        history = history[:MAX_HISTORY]
+        
+        # Save updated history
+        with open(report_path, "w") as f:
+            json.dump(history, f, indent=2)
+        
+        print(f"\n📊 Report saved to {report_path} (keeping {len(history)} runs)")
     
     async def run(self) -> bool:
         """Run complete health check."""
@@ -400,6 +440,52 @@ class HealthCheck:
             self.cleanup(keep_persistent=True)
 
 
+def print_history_summary():
+    """Print a summary of historical health check runs."""
+    report_path = Path("tests/health/reports/latest.json")
+    if not report_path.exists():
+        print("No history found")
+        return
+    
+    try:
+        with open(report_path) as f:
+            history = json.load(f)
+            if isinstance(history, dict):
+                history = [history]
+        
+        print("\n=== Health Check History ===")
+        print(f"Total runs: {len(history)}")
+        
+        if history:
+            # Summary stats
+            passed = sum(1 for run in history if run.get("status") == "passed")
+            failed = sum(1 for run in history if run.get("status") == "failed")
+            
+            print(f"Success rate: {passed}/{len(history)} ({passed*100//len(history)}%)")
+            
+            # Show last 5 runs
+            print("\nRecent runs:")
+            for run in history[:5]:
+                timestamp = run.get("timestamp", "unknown")
+                # Support both old 'mode' and new 'provider' field for backward compatibility
+                provider = run.get("provider", run.get("mode", "unknown"))
+                model = run.get("model", "")
+                status = run.get("status", "unknown")
+                total_time = run.get("timings", {}).get("total", 0)
+                
+                status_emoji = "✅" if status == "passed" else "❌"
+                # Show model name if available
+                if model and model != "unknown":
+                    # Truncate long model names for display
+                    model_display = model if len(model) <= 20 else model[:17] + "..."
+                    print(f"  {status_emoji} {timestamp[:19]} - {provider:8} - {model_display:20} - {total_time:6.1f}s")
+                else:
+                    print(f"  {status_emoji} {timestamp[:19]} - {provider:8} - {total_time:6.1f}s")
+    
+    except Exception as e:
+        print(f"Error reading history: {e}")
+
+
 async def main():
     """Main entry point."""
     import argparse
@@ -426,8 +512,18 @@ async def main():
         default=".health/dickens",
         help="Persistent working directory (default: .health/dickens)"
     )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Show health check history and exit"
+    )
     
     args = parser.parse_args()
+    
+    # If --history flag, show history and exit
+    if args.history:
+        print_history_summary()
+        return
     
     # Determine environment file
     env_file = args.env
