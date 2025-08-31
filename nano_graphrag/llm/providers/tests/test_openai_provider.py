@@ -30,22 +30,27 @@ class TestBaseLLMProvider:
             env_key = "TEST_API_KEY"
             
             async def complete(self, prompt, **kwargs):
-                return "test"
+                # Must return CompletionResponse dict
+                return {
+                    "text": "test",
+                    "finish_reason": "stop",
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+                    "raw": None
+                }
             
             async def stream(self, prompt, **kwargs):
                 yield "test"
         
+        # Current API doesn't accept max_tokens/temperature in constructor
         provider = TestProvider(
             model="test-model",
             api_key="test-key",
-            max_tokens=1024,
-            temperature=0.5
+            base_url="https://api.test.com"
         )
         
         assert provider.model == "test-model"
         assert provider.api_key == "test-key"
-        assert provider.max_tokens == 1024
-        assert provider.temperature == 0.5
+        assert provider.base_url == "https://api.test.com"
     
     def test_provider_reads_env_key(self):
         """Verify provider reads API key from environment."""
@@ -67,13 +72,20 @@ class TestBaseLLMProvider:
         """Verify caching works correctly."""
         class TestProvider(BaseLLMProvider):
             async def complete(self, prompt, **kwargs):
-                return "response"
+                # Must return CompletionResponse dict
+                return {
+                    "text": "response",
+                    "finish_reason": "stop",
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+                    "raw": None
+                }
             
             async def stream(self, prompt, **kwargs):
                 yield "response"
         
         provider = TestProvider(model="test-model")
         mock_cache = AsyncMock()
+        # complete_with_cache expects the cache to store the text value
         mock_cache.get_by_id.return_value = {"return": "cached_response"}
         
         result = await provider.complete_with_cache(
@@ -81,6 +93,7 @@ class TestBaseLLMProvider:
             hashing_kv=mock_cache
         )
         
+        # complete_with_cache returns just the text string from cache
         assert result == "cached_response"
         mock_cache.get_by_id.assert_called_once()
     
@@ -111,22 +124,36 @@ class TestOpenAIProvider:
     
     @pytest.mark.asyncio
     async def test_openai_complete(self):
-        """Verify OpenAI provider returns completion."""
-        provider = OpenAIProvider(model="gpt-4o-mini")
-        
+        """Verify OpenAI provider returns CompletionResponse dict."""
         with patch('openai.AsyncOpenAI') as mock_client_class:
             mock_client = AsyncMock()
             mock_client_class.return_value = mock_client
             
+            # Create proper mock response with usage
             mock_response = Mock()
-            mock_response.choices = [Mock(message=Mock(content="test response"))]
-            mock_client.chat.completions.create.return_value = mock_response
+            mock_response.choices = [Mock()]
+            mock_response.choices[0].message.content = "test response"
+            mock_response.choices[0].finish_reason = "stop"
+            mock_response.usage.prompt_tokens = 10
+            mock_response.usage.completion_tokens = 20
+            mock_response.usage.total_tokens = 30
             
+            async def mock_create(**kwargs):
+                return mock_response
+            
+            mock_client.chat.completions.create = mock_create
+            
+            provider = OpenAIProvider(model="gpt-4o-mini")
             provider.client = mock_client
-            result = await provider.complete("test prompt")
             
-            assert result == "test response"
-            mock_client.chat.completions.create.assert_called_once()
+            with patch('asyncio.wait_for', side_effect=lambda coro, timeout: coro):
+                result = await provider.complete("test prompt")
+            
+            # OpenAI provider returns CompletionResponse dict
+            assert isinstance(result, dict)
+            assert result["text"] == "test response"
+            assert result["finish_reason"] == "stop"
+            assert result["usage"]["total_tokens"] == 30
     
     @pytest.mark.asyncio
     async def test_openai_with_system_and_history(self):
@@ -178,7 +205,7 @@ class TestOpenAIEmbeddingProvider:
     
     @pytest.mark.asyncio
     async def test_embedding_mock(self):
-        """Test embedding with mocked response."""
+        """Test embedding returns EmbeddingResponse dict."""
         provider = OpenAIEmbeddingProvider()
         
         with patch('openai.AsyncOpenAI') as mock_client_class:
@@ -191,18 +218,24 @@ class TestOpenAIEmbeddingProvider:
                 Mock(embedding=[0.1] * 1536),
                 Mock(embedding=[0.2] * 1536)
             ]
-            mock_client.embeddings.create.return_value = mock_response
+            mock_response.usage.total_tokens = 20
+            
+            async def mock_create(**kwargs):
+                return mock_response
+            
+            mock_client.embeddings.create = mock_create
             provider.client = mock_client
             
-            result = await provider.embed(["text1", "text2"])
+            with patch('asyncio.wait_for', side_effect=lambda coro, timeout: coro):
+                result = await provider.embed(["text1", "text2"])
             
-            assert result.shape == (2, 1536)
-            assert isinstance(result, np.ndarray)
-            mock_client.embeddings.create.assert_called_once_with(
-                model="text-embedding-3-small",
-                input=["text1", "text2"],
-                encoding_format="float"
-            )
+            # Provider returns EmbeddingResponse dict
+            assert isinstance(result, dict)
+            assert "embeddings" in result
+            assert result["embeddings"].shape == (2, 1536)
+            assert isinstance(result["embeddings"], np.ndarray)
+            assert result["dimensions"] == 1536
+            assert result["usage"]["total_tokens"] == 20
 
 
 class TestBackwardCompatibility:

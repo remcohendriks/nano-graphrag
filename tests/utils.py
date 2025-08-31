@@ -1,5 +1,6 @@
 """Test utilities for nano-graphrag tests."""
 import os
+import json
 import numpy as np
 from unittest.mock import AsyncMock, Mock
 from typing import Optional, List, Dict, Any
@@ -80,3 +81,55 @@ def load_test_data(max_chars: int = 10000) -> str:
     test_file = os.path.join(os.path.dirname(__file__), "mock_data.txt")
     with open(test_file, encoding="utf-8-sig") as f:
         return f.read()[:max_chars]
+
+
+def create_completion_response(text: str = "test response", tokens: int = 100) -> Dict[str, Any]:
+    """Create a properly shaped CompletionResponse dict."""
+    return {
+        "text": text,
+        "finish_reason": "stop",
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": tokens - 10,
+            "total_tokens": tokens
+        },
+        "raw": Mock()  # Original response object
+    }
+
+
+def create_embedding_response(dimension: int = 1536, num_texts: int = 1) -> Dict[str, Any]:
+    """Create a properly shaped EmbeddingResponse dict."""
+    return {
+        "embeddings": np.random.rand(num_texts, dimension),
+        "dimensions": dimension,
+        "usage": {"total_tokens": num_texts * 10}
+    }
+
+
+def make_storage_config(temp_dir: str, include_clustering: bool = True, include_node2vec: bool = False) -> Dict[str, Any]:
+    """Create storage configuration with all required keys."""
+    config = {
+        "working_dir": temp_dir,
+        "embedding_func": mock_embedding_func,
+        "embedding_batch_num": 32,
+        "embedding_func_max_async": 16,
+    }
+    
+    if include_clustering:
+        config.update({
+            "graph_cluster_algorithm": "leiden",
+            "max_graph_cluster_size": 10,
+            "graph_cluster_seed": 0xDEADBEEF,
+        })
+    
+    if include_node2vec:
+        config["node2vec_params"] = {
+            "dimensions": 128,
+            "num_walks": 10,
+            "walk_length": 40,
+            "window_size": 2,
+            "iterations": 3,
+            "random_seed": 3,
+        }
+    
+    return config

@@ -24,29 +24,21 @@ async def mock_embedding(texts: list[str]) -> np.ndarray:
     return np.random.rand(len(texts), 384)
 
 
+async def seed_minimal_graph(storage):
+    """Pre-seed a minimal graph for clustering tests."""
+    await storage.upsert_node("node1", {"data": "test1"})
+    await storage.upsert_node("node2", {"data": "test2"})
+    await storage.upsert_edge("node1", "node2", {"weight": 1.0})
+
+
 @pytest.fixture
 def networkx_storage(temp_dir):
     """Create NetworkXStorage with proper config including clustering."""
-    # Create config dict with clustering parameters
-    global_config = {
-        "working_dir": temp_dir,
-        "embedding_func": mock_embedding,
-        "embedding_batch_num": 32,
-        "embedding_func_max_async": 16,
-        # Clustering configuration required by NetworkXStorage
-        "graph_cluster_algorithm": "leiden",
-        "max_graph_cluster_size": 10,
-        "graph_cluster_seed": 0xDEADBEEF,
-        # Node2vec parameters for embed_nodes test
-        "node2vec_params": {
-            "dimensions": 128,
-            "num_walks": 10,
-            "walk_length": 40,
-            "window_size": 2,
-            "iterations": 3,
-            "random_seed": 3,
-        },
-    }
+    # Create config dict with clustering parameters using helper
+    from tests.utils import make_storage_config
+    global_config = make_storage_config(temp_dir, include_clustering=True, include_node2vec=True)
+    # Override embedding_func with local mock
+    global_config["embedding_func"] = mock_embedding
     
     # Ensure the directory exists
     Path(temp_dir).mkdir(parents=True, exist_ok=True)
