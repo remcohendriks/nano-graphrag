@@ -37,15 +37,16 @@ class TestOpenAIProvider:
             mock_response.usage = usage
             
             # Create async mock that returns the response
-            async def mock_create_fn(**kwargs):
-                return mock_response
-            
-            mock_client.chat.completions.create = mock_create_fn
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
             
             provider = OpenAIProvider(model="gpt-5-mini")
+            provider.client = mock_client
             
             # Test max_tokens → max_completion_tokens mapping
-            with patch('asyncio.wait_for', side_effect=lambda coro, timeout: coro):
+            async def mock_wait_for(coro, timeout):
+                return await coro
+            
+            with patch('asyncio.wait_for', side_effect=mock_wait_for):
                 result = await provider.complete("test", max_tokens=1000)
             
             # Verify response structure
@@ -78,7 +79,13 @@ class TestOpenAIProvider:
             mock_create.return_value = mock_response
             
             provider = OpenAIProvider(model="gpt-5")
-            result = await provider.complete("test")
+            provider.client = mock_client
+            
+            async def mock_wait_for(coro, timeout):
+                return await coro
+            
+            with patch('asyncio.wait_for', side_effect=mock_wait_for):
+                result = await provider.complete("test")
             
             # Should default to empty string
             assert result["text"] == ""
@@ -90,7 +97,7 @@ class TestOpenAIProvider:
             "LLM_BASE_URL": "http://localhost:1234/v1",
             "OPENAI_API_KEY": "test-key"
         }):
-            with patch('openai.AsyncOpenAI') as mock_openai:
+            with patch('nano_graphrag.llm.providers.openai.AsyncOpenAI') as mock_openai:
                 mock_openai.return_value = MagicMock()
                 llm_provider = get_llm_provider('openai', 'test-model')
                 llm_kwargs = mock_openai.call_args.kwargs
@@ -101,7 +108,7 @@ class TestOpenAIProvider:
             "EMBEDDING_BASE_URL": "https://api.openai.com/v1",
             "OPENAI_API_KEY": "test-key"
         }):
-            with patch('openai.AsyncOpenAI') as mock_openai:
+            with patch('nano_graphrag.llm.providers.openai.AsyncOpenAI') as mock_openai:
                 mock_openai.return_value = MagicMock()
                 embed_provider = get_embedding_provider('openai', 'text-embedding-3-small')
                 embed_kwargs = mock_openai.call_args.kwargs
@@ -175,8 +182,8 @@ class TestProviderIntegration:
         from nano_graphrag import GraphRAG
         from nano_graphrag.config import GraphRAGConfig, StorageConfig
         
-        with patch('nano_graphrag.llm.providers.get_llm_provider') as mock_get_llm, \
-             patch('nano_graphrag.llm.providers.get_embedding_provider') as mock_get_embed, \
+        with patch('nano_graphrag.graphrag.get_llm_provider') as mock_get_llm, \
+             patch('nano_graphrag.graphrag.get_embedding_provider') as mock_get_embed, \
              patch('pathlib.Path.mkdir'):  # Prevent directory creation
             
             # Create mock providers

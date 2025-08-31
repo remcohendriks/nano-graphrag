@@ -41,7 +41,8 @@ def temp_working_dir(tmp_path):
 @pytest.fixture
 def mock_providers():
     """Create mock LLM and embedding providers."""
-    llm_provider = create_mock_llm_provider([FAKE_RESPONSE, FAKE_JSON])
+    # Return JSON first to satisfy global mapping step deterministically
+    llm_provider = create_mock_llm_provider([FAKE_JSON, FAKE_RESPONSE])
     # Use 1536 dimension to match OpenAI default
     embedding_provider = create_mock_embedding_provider(dimension=1536)
     return llm_provider, embedding_provider
@@ -101,7 +102,7 @@ async def test_local_query_with_mocks(temp_working_dir, mock_providers):
             "chunk1": {"content": "Test chunk content", "source_id": "doc1"}
         })
         await rag.entities_vdb.upsert({
-            "entity1": {"content": "Test entity", "source_id": "chunk1"}
+            "entity1": {"content": "Test entity", "entity_name": "entity1", "source_id": "chunk1"}
         })
         
         # Mock query - should not fail with "No available context"

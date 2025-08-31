@@ -40,6 +40,14 @@ class TestBaseLLMProvider:
             
             async def stream(self, prompt, **kwargs):
                 yield "test"
+            
+            def _translate_params(self, params):
+                """Translate internal params to API params."""
+                return params
+            
+            def _translate_error(self, error):
+                """Translate vendor errors to standard errors."""
+                return error
         
         # Current API doesn't accept max_tokens/temperature in constructor
         provider = TestProvider(
@@ -58,10 +66,21 @@ class TestBaseLLMProvider:
             env_key = "TEST_API_KEY"
             
             async def complete(self, prompt, **kwargs):
-                return "test"
+                return {
+                    "text": "test",
+                    "finish_reason": "stop",
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+                    "raw": None
+                }
             
             async def stream(self, prompt, **kwargs):
                 yield "test"
+            
+            def _translate_params(self, params):
+                return params
+            
+            def _translate_error(self, error):
+                return error
         
         with patch.dict(os.environ, {"TEST_API_KEY": "env-test-key"}):
             provider = TestProvider(model="test-model")
@@ -82,6 +101,12 @@ class TestBaseLLMProvider:
             
             async def stream(self, prompt, **kwargs):
                 yield "response"
+            
+            def _translate_params(self, params):
+                return params
+            
+            def _translate_error(self, error):
+                return error
         
         provider = TestProvider(model="test-model")
         mock_cache = AsyncMock()
@@ -101,10 +126,21 @@ class TestBaseLLMProvider:
         """Verify message list is built correctly."""
         class TestProvider(BaseLLMProvider):
             async def complete(self, prompt, **kwargs):
-                return "test"
+                return {
+                    "text": "test",
+                    "finish_reason": "stop",
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+                    "raw": None
+                }
             
             async def stream(self, prompt, **kwargs):
                 yield "test"
+            
+            def _translate_params(self, params):
+                return params
+            
+            def _translate_error(self, error):
+                return error
         
         provider = TestProvider(model="test")
         messages = provider._build_messages(
@@ -138,15 +174,15 @@ class TestOpenAIProvider:
             mock_response.usage.completion_tokens = 20
             mock_response.usage.total_tokens = 30
             
-            async def mock_create(**kwargs):
-                return mock_response
-            
-            mock_client.chat.completions.create = mock_create
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
             
             provider = OpenAIProvider(model="gpt-4o-mini")
             provider.client = mock_client
             
-            with patch('asyncio.wait_for', side_effect=lambda coro, timeout: coro):
+            async def mock_wait_for(coro, timeout):
+                return await coro
+            
+            with patch('asyncio.wait_for', side_effect=mock_wait_for):
                 result = await provider.complete("test prompt")
             
             # OpenAI provider returns CompletionResponse dict
@@ -220,13 +256,13 @@ class TestOpenAIEmbeddingProvider:
             ]
             mock_response.usage.total_tokens = 20
             
-            async def mock_create(**kwargs):
-                return mock_response
-            
-            mock_client.embeddings.create = mock_create
+            mock_client.embeddings.create = AsyncMock(return_value=mock_response)
             provider.client = mock_client
             
-            with patch('asyncio.wait_for', side_effect=lambda coro, timeout: coro):
+            async def mock_wait_for(coro, timeout):
+                return await coro
+            
+            with patch('asyncio.wait_for', side_effect=mock_wait_for):
                 result = await provider.embed(["text1", "text2"])
             
             # Provider returns EmbeddingResponse dict
