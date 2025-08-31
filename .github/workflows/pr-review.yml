@@ -1,0 +1,169 @@
+name: PR Review with Claude
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  claude-review:
+    # Only run on PR comments, not issue comments
+    if: |
+      github.event.issue.pull_request &&
+      github.actor == 'remcohendriks' &&
+      contains(github.event.comment.body, '/review')
+    
+    runs-on: self-hosted
+    
+    # Prevent parallel reviews on same PR
+    concurrency:
+      group: pr-review-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    
+    steps:
+      - name: Extract review round
+        id: extract-round
+        run: |
+          COMMENT="${{ github.event.comment.body }}"
+          if [[ "$COMMENT" =~ /review[[:space:]]+round-([0-9]+) ]]; then
+            echo "round=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          else
+            echo "round=1" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Get PR details
+        id: pr-details
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_DATA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }})
+          echo "head_sha=$(echo "$PR_DATA" | jq -r .head.sha)" >> $GITHUB_OUTPUT
+          echo "head_ref=$(echo "$PR_DATA" | jq -r .head.ref)" >> $GITHUB_OUTPUT
+          echo "base_ref=$(echo "$PR_DATA" | jq -r .base.ref)" >> $GITHUB_OUTPUT
+      
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr-details.outputs.head_ref }}
+          fetch-depth: 0
+      
+      - name: Check for existing review
+        id: check-existing
+        run: |
+          REVIEW_FILE="reviews/PR-${{ github.event.issue.number }}-round-${{ steps.extract-round.outputs.round }}-${{ steps.pr-details.outputs.head_sha }}.md"
+          if [[ -f "$REVIEW_FILE" ]]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Review already exists for this SHA and round"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Generate diff
+        if: steps.check-existing.outputs.exists == 'false'
+        run: |
+          git diff origin/${{ steps.pr-details.outputs.base_ref }}..HEAD > pr-diff.txt
+          echo "Generated diff between ${{ steps.pr-details.outputs.base_ref }} and HEAD"
+      
+      - name: Find implementation report
+        if: steps.check-existing.outputs.exists == 'false'
+        id: find-report
+        run: |
+          # Look for most recent implementation report
+          REPORT=$(find reports -name "*.md" -type f 2>/dev/null | xargs ls -t 2>/dev/null | head -1 || echo "")
+          if [[ -n "$REPORT" ]]; then
+            echo "report_file=$REPORT" >> $GITHUB_OUTPUT
+            echo "Found implementation report: $REPORT"
+          else
+            echo "report_file=" >> $GITHUB_OUTPUT
+            echo "No implementation report found"
+          fi
+      
+      - name: Prepare review context
+        if: steps.check-existing.outputs.exists == 'false'
+        run: |
+          mkdir -p review-context
+          
+          # Create context file
+          cat > review-context/context.md << 'EOF'
+          # PR Review Request
+          
+          **PR Number**: #${{ github.event.issue.number }}
+          **Review Round**: ${{ steps.extract-round.outputs.round }}
+          **Branch**: ${{ steps.pr-details.outputs.head_ref }}
+          **SHA**: ${{ steps.pr-details.outputs.head_sha }}
+          
+          ## Implementation Report
+          EOF
+          
+          if [[ -n "${{ steps.find-report.outputs.report_file }}" ]]; then
+            echo "" >> review-context/context.md
+            cat "${{ steps.find-report.outputs.report_file }}" >> review-context/context.md
+          else
+            echo "No implementation report available." >> review-context/context.md
+          fi
+          
+          echo "" >> review-context/context.md
+          echo "## Code Changes" >> review-context/context.md
+          echo '```diff' >> review-context/context.md
+          head -5000 pr-diff.txt >> review-context/context.md
+          echo '```' >> review-context/context.md
+      
+      - name: Run Claude review
+        if: steps.check-existing.outputs.exists == 'false'
+        id: claude-review
+        run: |
+          # Create review directory
+          mkdir -p reviews
+          
+          # Prepare output file
+          REVIEW_FILE="reviews/PR-${{ github.event.issue.number }}-round-${{ steps.extract-round.outputs.round }}-${{ steps.pr-details.outputs.head_sha }}.md"
+          
+          # Run Claude CLI with review prompt
+          cat .github/review-prompts/claude-prompt.md review-context/context.md | \
+            claude --max-tokens 8000 > "$REVIEW_FILE" 2>&1
+          
+          echo "review_file=$REVIEW_FILE" >> $GITHUB_OUTPUT
+      
+      - name: Commit review
+        if: steps.check-existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          git add reviews/
+          git commit -m "Add Claude review for PR #${{ github.event.issue.number }} round ${{ steps.extract-round.outputs.round }}"
+          git push origin HEAD:${{ steps.pr-details.outputs.head_ref }}
+      
+      - name: Post review comment
+        if: steps.check-existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REVIEW_FILE="${{ steps.claude-review.outputs.review_file }}"
+          
+          # Create comment body
+          cat > comment.md << 'EOF'
+          ## Claude Review - Round ${{ steps.extract-round.outputs.round }}
+          
+          Review completed and saved to: `${{ steps.claude-review.outputs.review_file }}`
+          
+          ### Review Summary
+          EOF
+          
+          # Extract first few lines of review for summary
+          head -20 "$REVIEW_FILE" >> comment.md
+          
+          echo "" >> comment.md
+          echo "[View full review](${{ github.server_url }}/${{ github.repository }}/blob/${{ steps.pr-details.outputs.head_ref }}/${{ steps.claude-review.outputs.review_file }})" >> comment.md
+          
+          # Post comment
+          gh pr comment ${{ github.event.issue.number }} --body-file comment.md
+      
+      - name: Skip message
+        if: steps.check-existing.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment ${{ github.event.issue.number }} \
+            --body "Review already exists for SHA ${{ steps.pr-details.outputs.head_sha }} round ${{ steps.extract-round.outputs.round }}. Push new changes to trigger a new review."
