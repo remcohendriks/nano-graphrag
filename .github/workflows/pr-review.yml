@@ -130,7 +130,13 @@ jobs:
           
           # Run Claude CLI with Opus model in non-interactive mode
           PROMPT_CONTENT=$(cat .github/review-prompts/claude-prompt.md review-context/context.md)
-          claude --model opus -p "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1
+          
+          # Run claude and capture both stdout and stderr
+          if ! claude --model opus -p "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1; then
+            echo "Claude CLI failed. Error output:"
+            cat "$REVIEW_FILE"
+            exit 1
+          fi
           
           echo "review_file=$REVIEW_FILE" >> $GITHUB_OUTPUT
       
