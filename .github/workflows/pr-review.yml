@@ -147,7 +147,26 @@ jobs:
           
           # Use -p flag with file content for non-interactive mode
           PROMPT_CONTENT=$(cat review-context/full-prompt.md)
-          if ! claude --model opus -p "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1; then
+          echo "Running Claude review..."
+          if claude --model opus -p "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1; then
+            echo "Claude command completed successfully"
+            # Check if file has content
+            if [ -s "$REVIEW_FILE" ]; then
+              echo "Review file created with $(wc -l < "$REVIEW_FILE") lines"
+              echo "First 50 lines of review:"
+              head -50 "$REVIEW_FILE"
+            else
+              echo "WARNING: Review file is empty!"
+              echo "Trying without redirecting stderr..."
+              claude --model opus -p "$PROMPT_CONTENT" > "$REVIEW_FILE"
+              if [ -s "$REVIEW_FILE" ]; then
+                echo "Review file now has $(wc -l < "$REVIEW_FILE") lines"
+              else
+                echo "Review file still empty. Claude may not be producing output."
+                exit 1
+              fi
+            fi
+          else
             echo "Claude CLI failed. Error output:"
             cat "$REVIEW_FILE"
             # Try with shorter prompt if it fails
