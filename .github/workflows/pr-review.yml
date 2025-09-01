@@ -135,11 +135,21 @@ jobs:
           REVIEW_FILE="reviews/PR-${{ github.event.issue.number }}-round-${{ steps.extract-round.outputs.round }}-${{ steps.pr-details.outputs.head_sha }}.md"
           
           # Run Claude CLI with Opus model in non-interactive mode
-          # Use stdin to avoid "Argument list too long" error
-          if ! cat .github/review-prompts/claude-prompt.md review-context/context.md | claude --model opus > "$REVIEW_FILE" 2>&1; then
+          # Combine prompt and context into a single file to avoid "Argument list too long" error
+          cat .github/review-prompts/claude-prompt.md review-context/context.md > review-context/full-prompt.md
+          
+          # Use -p flag with file content for non-interactive mode
+          if ! claude --model opus -p "$(cat review-context/full-prompt.md)" > "$REVIEW_FILE" 2>&1; then
             echo "Claude CLI failed. Error output:"
             cat "$REVIEW_FILE"
-            exit 1
+            # Try with shorter prompt if it fails
+            echo "Retrying with truncated diff..."
+            head -3000 review-context/full-prompt.md > review-context/short-prompt.md
+            if ! claude --model opus -p "$(cat review-context/short-prompt.md)" > "$REVIEW_FILE" 2>&1; then
+              echo "Claude CLI failed again. Error output:"
+              cat "$REVIEW_FILE"
+              exit 1
+            fi
           fi
           
           echo "review_file=$REVIEW_FILE" >> $GITHUB_OUTPUT
