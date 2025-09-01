@@ -46,6 +46,17 @@ jobs:
           ref: ${{ steps.pr-details.outputs.head_ref }}
           fetch-depth: 0
       
+      - name: Check Claude CLI availability
+        id: check-claude
+        run: |
+          if command -v claude &> /dev/null; then
+            echo "Claude CLI version: $(claude --version)"
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "Claude CLI not found"
+            echo "available=false" >> $GITHUB_OUTPUT
+          fi
+      
       - name: Check for existing review
         id: check-existing
         run: |
@@ -108,7 +119,7 @@ jobs:
           echo '```' >> review-context/context.md
       
       - name: Run Claude review
-        if: steps.check-existing.outputs.exists == 'false'
+        if: steps.check-existing.outputs.exists == 'false' && steps.check-claude.outputs.available == 'true'
         id: claude-review
         run: |
           # Create review directory
@@ -117,14 +128,21 @@ jobs:
           # Prepare output file
           REVIEW_FILE="reviews/PR-${{ github.event.issue.number }}-round-${{ steps.extract-round.outputs.round }}-${{ steps.pr-details.outputs.head_sha }}.md"
           
-          # Run Claude CLI with Opus 4.1 model in non-interactive mode
+          # Run Claude CLI with Opus model in non-interactive mode
           PROMPT_CONTENT=$(cat .github/review-prompts/claude-prompt.md review-context/context.md)
-          claude --model claude-opus-4-1-20250805 -p "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1
+          claude --model opus -p "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1
           
           echo "review_file=$REVIEW_FILE" >> $GITHUB_OUTPUT
       
+      - name: Handle missing Claude CLI
+        if: steps.check-existing.outputs.exists == 'false' && steps.check-claude.outputs.available == 'false'
+        run: |
+          echo "Error: Claude CLI is not available on this runner"
+          echo "Please install Claude CLI on the self-hosted runner"
+          exit 1
+      
       - name: Commit review
-        if: steps.check-existing.outputs.exists == 'false'
+        if: steps.check-existing.outputs.exists == 'false' && steps.check-claude.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -136,7 +154,7 @@ jobs:
           git push origin HEAD:${{ steps.pr-details.outputs.head_ref }}
       
       - name: Post review comment
-        if: steps.check-existing.outputs.exists == 'false'
+        if: steps.check-existing.outputs.exists == 'false' && steps.check-claude.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
