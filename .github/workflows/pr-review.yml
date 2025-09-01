@@ -141,44 +141,27 @@ jobs:
           # Prepare output file
           REVIEW_FILE="reviews/PR-${{ github.event.issue.number }}-round-${{ needs.prepare-context.outputs.round }}-claude-${{ needs.prepare-context.outputs.head_sha }}.md"
           
-          # Debug: Check Claude authentication status
-          echo "Checking Claude authentication..."
-          claude --version
-          
           # Run Claude CLI with Opus model in non-interactive mode
           # Combine prompt and context into a single file to avoid "Argument list too long" error
           cat .github/review-prompts/claude-prompt.md review-context/context.md > review-context/full-prompt.md
           
-          # Debug: Show prompt size
-          echo "Prompt size: $(wc -c < review-context/full-prompt.md) bytes"
-          
-          # Try running Claude with output to terminal first for debugging
-          echo "Running Claude review (output to terminal for debugging)..."
+          # Use -p flag with file content for non-interactive mode
           PROMPT_CONTENT=$(cat review-context/full-prompt.md)
-          
-          # Run with timeout and show output directly
-          if timeout 300 claude --model opus -p "$PROMPT_CONTENT" 2>&1 | tee "$REVIEW_FILE"; then
-            echo "Claude review completed successfully"
-            echo "review_file=$REVIEW_FILE" >> $GITHUB_OUTPUT
-          else
-            EXIT_CODE=$?
-            echo "Claude CLI failed with exit code: $EXIT_CODE"
-            if [ $EXIT_CODE -eq 124 ]; then
-              echo "Claude timed out after 5 minutes. Trying with shorter prompt..."
-              head -2000 review-context/full-prompt.md > review-context/short-prompt.md
-              PROMPT_SHORT=$(cat review-context/short-prompt.md)
-              if timeout 120 claude --model opus -p "$PROMPT_SHORT" 2>&1 | tee "$REVIEW_FILE"; then
-                echo "Claude review completed with shortened prompt"
-                echo "review_file=$REVIEW_FILE" >> $GITHUB_OUTPUT
-              else
-                echo "Claude failed even with shortened prompt"
-                exit 1
-              fi
-            else
-              echo "Claude failed with error. Check output above."
+          if ! claude --model opus -p "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1; then
+            echo "Claude CLI failed. Error output:"
+            cat "$REVIEW_FILE"
+            # Try with shorter prompt if it fails
+            echo "Retrying with truncated diff..."
+            head -3000 review-context/full-prompt.md > review-context/short-prompt.md
+            PROMPT_SHORT=$(cat review-context/short-prompt.md)
+            if ! claude --model opus -p "$PROMPT_SHORT" > "$REVIEW_FILE" 2>&1; then
+              echo "Claude CLI failed again. Error output:"
+              cat "$REVIEW_FILE"
               exit 1
             fi
           fi
+          
+          echo "review_file=$REVIEW_FILE" >> $GITHUB_OUTPUT
       
       - name: Handle missing Claude CLI
         if: steps.check-existing.outputs.exists == 'false' && steps.check-claude.outputs.available == 'false'
