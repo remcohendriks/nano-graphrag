@@ -53,7 +53,7 @@
 **Install from source** (recommend)
 
 ```shell
-# clone this repo first
+# Clone this repository first
 cd nano-graphrag
 pip install -e .
 ```
