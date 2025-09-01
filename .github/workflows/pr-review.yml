@@ -319,13 +319,13 @@ jobs:
           
           # Use codex command with proper syntax
           PROMPT_CONTENT=$(cat review-context/full-prompt.md)
-          if ! codex --config model_reasoning_effort="high" exec "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1; then
+          if ! codex --config model_reasoning_effort="high" exec --skip-git-repo-check "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1; then
             echo "Codex CLI failed. Error output:"
             cat "$REVIEW_FILE"
             # Try with shorter prompt if it fails
             echo "Retrying with truncated diff..."
             PROMPT_SHORT=$(head -3000 review-context/full-prompt.md)
-            if ! codex --config model_reasoning_effort="high" exec "$PROMPT_SHORT" > "$REVIEW_FILE" 2>&1; then
+            if ! codex --config model_reasoning_effort="high" exec --skip-git-repo-check "$PROMPT_SHORT" > "$REVIEW_FILE" 2>&1; then
               echo "Codex CLI failed again. Error output:"
               cat "$REVIEW_FILE"
               exit 1
