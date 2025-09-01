@@ -13,25 +13,40 @@ on:
 jobs:
   claude:
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issue_comment' && 
+       ((contains(github.event.comment.body, '@claude') && github.event.issue.pull_request) || 
+        (contains(github.event.comment.body, '/review') && github.event.issue.pull_request && github.actor == 'remcohendriks'))) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: write  # Changed to write for committing reviews
+      pull-requests: write  # Changed to write for posting comments
+      issues: write  # Changed to write for issue comments
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
+      - name: Extract review round
+        id: extract-round
+        if: github.event_name == 'issue_comment' && contains(github.event.comment.body, '/review')
+        run: |
+          COMMENT="${{ github.event.comment.body }}"
+          if [[ "$COMMENT" =~ /review[[:space:]]+round-([0-9]+) ]]; then
+            echo "round=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            echo "has_round=true" >> $GITHUB_OUTPUT
+          else
+            echo "round=1" >> $GITHUB_OUTPUT
+            echo "has_round=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code
-        id: claude
+      - name: Run Claude Code with Round Context
+        if: steps.extract-round.outputs.has_round == 'true' || contains(github.event.comment.body, '/review')
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -40,11 +55,84 @@ jobs:
           additional_permissions: |
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.issue.number }}
+            REVIEW ROUND: ${{ steps.extract-round.outputs.round || '1' }}
+            
+            Please perform a comprehensive code review (Round ${{ steps.extract-round.outputs.round || '1' }}):
+            
+            ## Review Focus Areas
+            
+            ### Code Quality
+            - Best practices and design patterns
+            - Code readability and maintainability  
+            - DRY principle adherence
+            - Type safety and error handling
+            
+            ### Potential Issues
+            - Bugs and logic errors
+            - Edge cases not handled
+            - Race conditions or deadlocks
+            - Memory leaks or performance issues
+            
+            ### Security Concerns  
+            - Input validation
+            - Authentication/authorization issues
+            - Potential vulnerabilities
+            - Sensitive data exposure
+            
+            ### Testing
+            - Test coverage adequacy
+            - Missing test scenarios
+            - Test quality and assertions
+            
+            ## Important Instructions
+            
+            1. First, get the current commit SHA:
+               ```bash
+               git rev-parse HEAD
+               ```
+            
+            2. Create the reviews directory if it doesn't exist:
+               ```bash
+               mkdir -p reviews
+               ```
+            
+            3. Write your detailed review to a file named:
+               `reviews/PR-${{ github.event.issue.number }}-round-${{ steps.extract-round.outputs.round || '1' }}-claude-{SHA}.md`
+               
+               Replace {SHA} with the actual commit SHA from step 1.
+            
+            4. Commit and push the review file to the PR branch:
+               ```bash
+               git add reviews/
+               git commit -m "Add Claude review for PR #${{ github.event.issue.number }} round ${{ steps.extract-round.outputs.round || '1' }}"
+               git push
+               ```
+            
+            5. Post a summary comment on the PR with:
+               - Link to the full review file
+               - Key findings summary
+               - Note that this is Review Round ${{ steps.extract-round.outputs.round || '1' }}
+            
+            6. Add inline comments for specific code issues using the GitHub tools.
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
-          # claude_args: '--model claude-opus-4-1-20250805 --allowed-tools Bash(gh pr:*)'
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git:*),Write,Read,Edit"
+
+      - name: Run Claude Code Default
+        if: "!(steps.extract-round.outputs.has_round == 'true' || contains(github.event.comment.body, '/review'))"
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          
+          # This is an optional setting that allows Claude to read CI results on PRs
+          additional_permissions: |
+            actions: read
+
+          # Let Claude perform the instructions specified in the comment that tagged it
+          
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git:*),Write,Read,Edit"
 
