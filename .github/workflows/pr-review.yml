@@ -117,9 +117,9 @@ jobs:
           # Prepare output file
           REVIEW_FILE="reviews/PR-${{ github.event.issue.number }}-round-${{ steps.extract-round.outputs.round }}-${{ steps.pr-details.outputs.head_sha }}.md"
           
-          # Run Claude CLI with review prompt
-          cat .github/review-prompts/claude-prompt.md review-context/context.md | \
-            claude --max-tokens 8000 > "$REVIEW_FILE" 2>&1
+          # Run Claude CLI with Opus 4.1 model in non-interactive mode
+          PROMPT_CONTENT=$(cat .github/review-prompts/claude-prompt.md review-context/context.md)
+          claude --model claude-opus-4-1-20250805 --max-tokens 8000 -p "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1
           
           echo "review_file=$REVIEW_FILE" >> $GITHUB_OUTPUT
       
