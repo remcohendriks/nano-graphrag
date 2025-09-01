@@ -129,10 +129,8 @@ jobs:
           REVIEW_FILE="reviews/PR-${{ github.event.issue.number }}-round-${{ steps.extract-round.outputs.round }}-${{ steps.pr-details.outputs.head_sha }}.md"
           
           # Run Claude CLI with Opus model in non-interactive mode
-          PROMPT_CONTENT=$(cat .github/review-prompts/claude-prompt.md review-context/context.md)
-          
-          # Run claude and capture both stdout and stderr
-          if ! claude --model opus -p "$PROMPT_CONTENT" > "$REVIEW_FILE" 2>&1; then
+          # Use stdin to avoid "Argument list too long" error
+          if ! cat .github/review-prompts/claude-prompt.md review-context/context.md | claude --model opus > "$REVIEW_FILE" 2>&1; then
             echo "Claude CLI failed. Error output:"
             cat "$REVIEW_FILE"
             exit 1
