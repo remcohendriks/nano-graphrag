@@ -46,6 +46,12 @@ jobs:
           ref: ${{ steps.pr-details.outputs.head_ref }}
           fetch-depth: 0
       
+      - name: Fetch review prompt from main
+        run: |
+          # Get the review prompt template from main branch
+          mkdir -p .github/review-prompts
+          git show origin/main:.github/review-prompts/claude-prompt.md > .github/review-prompts/claude-prompt.md
+      
       - name: Check Claude CLI availability
         id: check-claude
         run: |
