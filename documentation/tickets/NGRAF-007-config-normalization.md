@@ -5,14 +5,17 @@ Clean up `GraphRAGConfig.to_dict()` by moving legacy compatibility fields to a d
 
 **UPDATE**: Focus on clear separation between active config (`to_dict()`) and legacy shims (`to_legacy_dict()`). The expert correctly identified this distinction is crucial for maintainability.
 
+**EXPERT CONSENSUS**: All three assessments confirm this ticket is HIGHLY VIABLE and should be prioritized. Key discovery: node2vec parameters are actively used by NetworkX storage and need proper relocation, not removal.
+
 ## Context
 After NGRAF-002 config simplification, `GraphRAGConfig.to_dict()` contains 70+ lines mixing actual configuration with legacy compatibility fields. This makes it hard to understand what configuration actually matters versus what's there for backward compatibility. The current implementation makes it unclear which fields the system actually uses.
 
 ## Problem
-- `to_dict()` method conflates real config with compatibility shims
+- `to_dict()` method conflates real config with compatibility shims (47+ lines mixing concerns)
 - Hard to tell which fields are actually used vs legacy
-- Node embedding parameters added despite not being used
+- Node embedding parameters incorrectly assumed unused (actually used by NetworkX storage)
 - Confusing for maintainers and users
+- Multiple call sites (3 in graphrag.py) depend on mixed configuration
 
 ## Technical Solution
 
@@ -97,7 +100,7 @@ class GraphRAGConfig:
             'tiktoken_model_name': self.chunking.tokenizer_model if self.chunking.tokenizer == "tiktoken" else "gpt-4o",
             'huggingface_model_name': self.chunking.tokenizer_model if self.chunking.tokenizer == "huggingface" else "bert-base-uncased",
             
-            # Node embedding config (not actually used but expected by legacy code)
+            # Node embedding config (ACTUALLY USED by NetworkX storage - needs proper relocation)
             'node_embedding_algorithm': 'node2vec',
             'node2vec_params': {
                 'dimensions': self.embedding.dimension,
@@ -142,6 +145,27 @@ class GraphRAG:
         # etc.
 ```
 
+### Add Node2Vec Configuration
+```python
+# nano_graphrag/config.py
+
+@dataclass
+class Node2VecConfig:
+    """Node2Vec parameters for graph embeddings."""
+    dimensions: int = 128
+    num_walks: int = 10
+    walk_length: int = 40
+    window_size: int = 2
+    iterations: int = 3
+    random_seed: int = 3
+
+@dataclass
+class StorageConfig:
+    """Storage configuration."""
+    # ... existing fields ...
+    node2vec: Node2VecConfig = field(default_factory=Node2VecConfig)
+```
+
 ### Add Config Validation Helper
 ```python
 # nano_graphrag/config.py
@@ -167,19 +191,25 @@ def validate_config(config: GraphRAGConfig) -> List[str]:
 
 ### Files to Modify
 - `nano_graphrag/config.py`:
+  - Add `Node2VecConfig` dataclass
   - Split `to_dict()` into clean and legacy versions
   - Add `validate_config()` helper
   - Add docstrings explaining the split
 
 - `nano_graphrag/graphrag.py`:
-  - Update to use `to_legacy_dict()` for global_config
+  - Update `_global_config()` to use `to_legacy_dict()`
+  - Keep `to_dict()` for storage factory
   - Add config validation on init
+
+- `nano_graphrag/_storage/gdb_networkx.py`:
+  - Update to use proper Node2VecConfig instead of global_config
   
 ### Migration Path
-1. Keep both methods initially
-2. Update internal code to use clean config directly
-3. Mark `to_legacy_dict()` as deprecated in v0.2.0
-4. Remove in v0.3.0
+1. Phase 1: Create separation with both methods (backward compatible)
+2. Phase 2: Audit all 14 global_config references and migrate to direct config access
+3. Phase 3: Move node2vec params to proper StorageConfig location
+4. Phase 4: Mark `to_legacy_dict()` as deprecated in v0.2.0
+5. Phase 5: Remove in v0.3.0
 
 ## Definition of Done
 
@@ -238,12 +268,16 @@ def test_backward_compatibility():
 ```
 
 ### Acceptance Criteria
-- [ ] `to_dict()` returns only active configuration
-- [ ] `to_legacy_dict()` maintains full backward compatibility
+- [ ] `to_dict()` returns only active configuration (~20 lines)
+- [ ] `to_legacy_dict()` maintains full backward compatibility (~47 lines)
+- [ ] Node2vec params properly relocated to StorageConfig, not just marked legacy
+- [ ] Audit confirms all 14 global_config usage points
 - [ ] Config validation helper identifies common issues
 - [ ] All existing tests pass
 - [ ] Documentation updated to clarify config methods
+- [ ] Migration guide for config access patterns
 - [ ] No behavioral changes in GraphRAG
+- [ ] Storage Factory correctly reads HNSW params from clean dict
 
 ## Feature Branch
 `feature/ngraf-007-config-normalization`
@@ -255,9 +289,24 @@ def test_backward_compatibility():
 - Clear documentation of active vs legacy fields
 - All existing tests passing
 
+## Implementation Priority
+
+### HIGH PRIORITY (Expert Consensus)
+This ticket should be implemented soon because:
+1. **Active Usage Discovery**: Node2vec parameters are actually used, not legacy
+2. **Clarity Crisis**: 47+ lines mixing active and legacy config causes ongoing confusion
+3. **Tech Debt Accumulation**: Each new feature adds to config complexity
+4. **Post-NGRAF-006 Synergy**: Complements module decomposition perfectly
+
+### Risk Assessment
+- **Low Risk**: Backward compatibility fully maintained
+- **Medium Complexity**: Need to audit 14 global_config references
+- **High Value**: Significant maintainability improvement
+
 ## Benefits
 - **Clarity**: Clear separation between active config and compatibility
 - **Maintainability**: Easy to see what can be removed in future versions
 - **Documentation**: Self-documenting what's actually used
 - **Migration Path**: Clean path to remove legacy fields
 - **Validation**: Proactive detection of misconfigurations
+- **Reduced Confusion**: Developers can easily identify active vs legacy fields
