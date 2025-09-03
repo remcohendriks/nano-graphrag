@@ -1,0 +1,26 @@
+# GNU Screen configuration for proper colors
+# This fixes color issues with iTerm2 and macOS
+
+# Use 256 color terminal
+term "screen-256color"
+
+# Allow bold colors - necessary for some reason
+attrcolor b ".I"
+
+# Tell screen how to set colors. AB = background, AF=foreground
+termcapinfo xterm* 'Co#256:AB=\E[48;5;%dm:AF=\E[38;5;%dm'
+
+# Erase background with current bg color (fixes color bleeding)
+defbce "on"
+
+# Turn off visual bell
+vbell off
+
+# Detach on hangup
+autodetach on
+
+# Don't display copyright page
+startup_message off
+
+# Scrollback buffer
+defscrollback 10000
