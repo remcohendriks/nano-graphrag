@@ -357,3 +357,47 @@ To refactor from modified to clean version:
 - the openai models available are gpt-5 and gpt-5-mini
 - use context7 mcp copiously to inform yourself about the latest package definitions and api's
 - for tests, put testing files in a `tests` folder adjacent to the file to be tested
+
+## Module Structure (Post NGRAF-006 Refactoring)
+
+The codebase has been refactored to decompose the monolithic `_op.py` file into focused modules:
+
+### Core Operation Modules
+- **`_chunking.py`**: Text chunking operations
+  - `chunking_by_token_size`: Token-based text chunking
+  - `chunking_by_separators`: Separator-based text chunking  
+  - `get_chunks`: Process documents into chunks
+  - `get_chunks_v2`: Clean API for chunking
+
+- **`_extraction.py`**: Entity and relationship extraction
+  - `extract_entities`: Main entity extraction with storage
+  - `extract_entities_from_chunks`: Entity extraction without side effects
+  - Helper functions for entity/relationship processing
+
+- **`_community.py`**: Community detection and report generation
+  - `generate_community_report`: Generate hierarchical community reports
+  - `summarize_community`: Summarize single community
+  - Community packing and description functions
+
+- **`_query.py`**: Query operations
+  - `local_query`: Execute local graph query
+  - `global_query`: Execute global community query
+  - `naive_query`: Execute simple RAG query
+  - Helper functions for finding related communities and entities
+
+### Migration from Legacy Code
+- **`_op.py`**: Now a backward compatibility layer that re-exports from the new modules
+- Shows deprecation warning when imported
+- Migrate imports from `_op.py` to specific modules for better performance and clarity
+
+### Import Examples
+```python
+# Old way (deprecated)
+from nano_graphrag._op import local_query
+
+# New way (recommended)
+from nano_graphrag._query import local_query
+from nano_graphrag._chunking import chunking_by_token_size
+from nano_graphrag._extraction import extract_entities
+from nano_graphrag._community import generate_community_report
+```

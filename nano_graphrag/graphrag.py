@@ -7,14 +7,20 @@ from typing import Dict, List, Optional, Union, cast
 
 from .config import GraphRAGConfig
 from .llm.providers import get_llm_provider, get_embedding_provider
-from ._op import (
+from ._chunking import (
     chunking_by_token_size,
-    extract_entities,
-    generate_community_report,
     get_chunks,
     get_chunks_v2,
+)
+from ._extraction import (
+    extract_entities,
     extract_entities_from_chunks,
+)
+from ._community import (
+    generate_community_report,
     summarize_community,
+)
+from ._query import (
     local_query,
     global_query,
     naive_query,
@@ -240,7 +246,9 @@ class GraphRAG:
             
             # Store chunks
             for chunk in chunks:
-                chunk_id = compute_mdhash_id(chunk["content"], prefix="chunk-")
+                # Include doc_id in hash to prevent cross-document chunk collisions
+                chunk_id_content = f"{doc_id}::{chunk['content']}"
+                chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
                 chunk["doc_id"] = doc_id
                 await self.text_chunks.upsert({chunk_id: chunk})
                 
@@ -248,7 +256,9 @@ class GraphRAG:
             if self.config.query.enable_local:
                 chunk_map = {}
                 for i, chunk in enumerate(chunks):
-                    chunk_id = compute_mdhash_id(chunk["content"], prefix="chunk-")
+                    # Include doc_id in hash to prevent cross-document chunk collisions
+                    chunk_id_content = f"{doc_id}::{chunk['content']}"
+                    chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
                     chunk_map[chunk_id] = chunk
                 
                 await extract_entities(
@@ -264,7 +274,9 @@ class GraphRAG:
             if self.config.query.enable_naive_rag and self.chunks_vdb:
                 chunk_dict = {}
                 for chunk in chunks:
-                    chunk_id = compute_mdhash_id(chunk["content"], prefix="chunk-")
+                    # Include doc_id in hash to prevent cross-document chunk collisions
+                    chunk_id_content = f"{doc_id}::{chunk['content']}"
+                    chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
                     chunk_dict[chunk_id] = {
                         "content": chunk["content"],
                         "doc_id": doc_id,
