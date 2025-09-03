@@ -106,7 +106,7 @@ class NetworkXStorage(BaseGraphStorage):
     async def get_node(self, node_id: str) -> Union[dict, None]:
         return self._graph.nodes.get(node_id)
     
-    async def get_nodes_batch(self, node_ids: list[str]) -> dict[str, Union[dict, None]]:
+    async def get_nodes_batch(self, node_ids: list[str]) -> list[Union[dict, None]]:
         return await asyncio.gather(*[self.get_node(node_id) for node_id in node_ids])
 
     async def node_degree(self, node_id: str) -> int:

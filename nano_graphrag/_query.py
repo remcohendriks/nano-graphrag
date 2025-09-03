@@ -112,7 +112,7 @@ async def _find_most_related_text_unit_from_entities(
                 "order": index,
                 "relation_counts": relation_counts,
             }
-    if any([v is None for v in all_text_units_lookup.values()]):
+    if any(v.get("data") is None for v in all_text_units_lookup.values()):
         logger.warning("Text chunks are missing, maybe the storage is damaged")
     all_text_units = [
         {"id": k, **v} for k, v in all_text_units_lookup.items() if v is not None
@@ -126,7 +126,7 @@ async def _find_most_related_text_unit_from_entities(
         all_text_units,
         key=lambda x: x["data"]["content"] if x and x.get("data") else "",
         max_token_size=query_param.local_max_token_for_text_unit,
-        tokenizer_wrapper=tokenizer_wrapper, # 传入 wrapper
+        tokenizer_wrapper=tokenizer_wrapper, # Pass in wrapper
     )
     all_text_units: list[TextChunkSchema] = [t["data"] for t in all_text_units]
     return all_text_units
@@ -200,11 +200,11 @@ async def _build_local_query_context(
         node_datas, query_param, knowledge_graph_inst, tokenizer_wrapper
     )
     logger.info(
-        f"Using {len(node_datas)} entites, {len(use_communities)} communities, {len(use_relations)} relations, {len(use_text_units)} text units"
+        f"Using {len(node_datas)} entities, {len(use_communities)} communities, {len(use_relations)} relations, {len(use_text_units)} text units"
     )
-    entites_section_list = [["id", "entity", "type", "description", "rank"]]
+    entities_section_list = [["id", "entity", "type", "description", "rank"]]
     for i, n in enumerate(node_datas):
-        entites_section_list.append(
+        entities_section_list.append(
             [
                 i,
                 n["entity_name"],
@@ -213,7 +213,7 @@ async def _build_local_query_context(
                 n["rank"],
             ]
         )
-    entities_context = list_of_list_to_csv(entites_section_list)
+    entities_context = list_of_list_to_csv(entities_section_list)
 
     relations_section_list = [
         ["id", "source", "target", "description", "weight", "rank"]
@@ -310,7 +310,7 @@ async def _map_global_communities(
             communities_data,
             key=lambda x: x["report_string"],
             max_token_size=query_param.global_max_token_for_community_report,
-            tokenizer_wrapper=tokenizer_wrapper, # 传入 wrapper
+            tokenizer_wrapper=tokenizer_wrapper, # Pass in wrapper
         )
         community_groups.append(this_group)
         communities_data = communities_data[len(this_group) :]
@@ -409,7 +409,7 @@ async def global_query(
         final_support_points,
         key=lambda x: x["answer"],
         max_token_size=query_param.global_max_token_for_community_report,
-        tokenizer_wrapper=tokenizer_wrapper, # 传入 wrapper
+        tokenizer_wrapper=tokenizer_wrapper, # Pass in wrapper
     )
     points_context = []
     for dp in final_support_points:
@@ -451,7 +451,7 @@ async def naive_query(
         chunks,
         key=lambda x: x["content"],
         max_token_size=query_param.naive_max_token_for_text_unit,
-        tokenizer_wrapper=tokenizer_wrapper, # 传入 wrapper
+        tokenizer_wrapper=tokenizer_wrapper, # Pass in wrapper
     )
     logger.info(f"Truncate {len(chunks)} to {len(maybe_trun_chunks)} chunks")
     section = "--New Chunk--\n".join([c["content"] for c in maybe_trun_chunks])

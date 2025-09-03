@@ -233,7 +233,7 @@ async def extract_entities(
 
         history = pack_user_ass_to_openai_messages(hint_prompt, final_result, using_amazon_bedrock)
         for now_glean_index in range(entity_extract_max_gleaning):
-            glean_result = await use_llm_func(continue_prompt, history_messages=history)
+            glean_result = await use_llm_func(continue_prompt, history=history)
 
             history += pack_user_ass_to_openai_messages(continue_prompt, glean_result, using_amazon_bedrock)
             final_result += glean_result
@@ -241,7 +241,7 @@ async def extract_entities(
                 break
 
             if_loop_result: str = await use_llm_func(
-                if_loop_prompt, history_messages=history
+                if_loop_prompt, history=history
             )
             if_loop_result = if_loop_result.strip().strip('"').strip("'").lower()
             if if_loop_result != "yes":

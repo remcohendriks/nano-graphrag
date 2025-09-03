@@ -197,9 +197,9 @@ class Neo4jStorage(BaseGraphStorage):
         result = await self.get_nodes_batch([node_id])
         return result[0] if result else None
 
-    async def get_nodes_batch(self, node_ids: list[str]) -> dict[str, Union[dict, None]]:
+    async def get_nodes_batch(self, node_ids: list[str]) -> list[Union[dict, None]]:
         if not node_ids:
-            return {}
+            return []
             
         result_dict = {node_id: None for node_id in node_ids}
 

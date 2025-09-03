@@ -80,8 +80,10 @@ def get_chunks(new_docs, chunk_func=chunking_by_token_size, tokenizer_wrapper: T
         tokens, doc_keys=doc_keys, tokenizer_wrapper=tokenizer_wrapper, overlap_token_size=chunk_func_params.get("overlap_token_size", 128), max_token_size=chunk_func_params.get("max_token_size", 1024)
     )
     for chunk in chunks:
+        # Include doc_id in hash to prevent cross-document chunk collisions
+        chunk_id_content = f"{chunk['full_doc_id']}::{chunk['content']}"
         inserting_chunks.update(
-            {compute_mdhash_id(chunk["content"], prefix="chunk-"): chunk}
+            {compute_mdhash_id(chunk_id_content, prefix="chunk-"): chunk}
         )
     return inserting_chunks
 
