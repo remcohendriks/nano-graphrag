@@ -37,14 +37,14 @@ def chunking_by_token_size(
     return results
 
 
-def chunking_by_seperators(
+def chunking_by_separators(
     tokens_list: list[list[int]],
     doc_keys,
     tokenizer_wrapper: TokenizerWrapper,
     overlap_token_size=128,
     max_token_size=1024,
 ):
-    # *** 修改 ***: 直接使用 wrapper 编码，而不是获取底层 tokenizer
+    # *** Modified ***: Use wrapper encoding directly instead of getting underlying tokenizer
     separators = [tokenizer_wrapper.encode(s) for s in PROMPTS["default_text_separator"]]
     splitter = SeparatorSplitter(
         separators=separators,

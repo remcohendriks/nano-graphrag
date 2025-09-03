@@ -12,20 +12,23 @@ import warnings
 # Show deprecation warning
 warnings.warn(
     "Importing from _op.py is deprecated. "
-    "Please import from specific modules: chunking, extraction, community, query",
+    "Please import from specific modules: _chunking, _extraction, _community, _query",
     DeprecationWarning,
     stacklevel=2
 )
 
 # Import all functions from new modules for backward compatibility
-from .chunking import (
+from ._chunking import (
     chunking_by_token_size,
-    chunking_by_seperators,
+    chunking_by_separators,
     get_chunks,
     get_chunks_v2
 )
 
-from .extraction import (
+# Backward compatibility for typo
+chunking_by_seperators = chunking_by_separators
+
+from ._extraction import (
     _handle_entity_relation_summary,
     _handle_single_entity_extraction,
     _handle_single_relationship_extraction,
@@ -35,7 +38,7 @@ from .extraction import (
     extract_entities_from_chunks
 )
 
-from .community import (
+from ._community import (
     _pack_single_community_by_sub_communities,
     _pack_single_community_describe,
     _community_report_json_to_str,
@@ -43,7 +46,7 @@ from .community import (
     summarize_community
 )
 
-from .query import (
+from ._query import (
     _find_most_related_community_from_entities,
     _find_most_related_text_unit_from_entities,
     _find_most_related_edges_from_entities,

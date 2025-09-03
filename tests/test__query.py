@@ -3,7 +3,7 @@
 import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock
-from nano_graphrag.query import (
+from nano_graphrag._query import (
     _find_most_related_community_from_entities,
     _find_most_related_text_unit_from_entities,
     _find_most_related_edges_from_entities,
@@ -25,20 +25,7 @@ def tokenizer():
 @pytest.fixture
 def query_param():
     """Create query parameters."""
-    return QueryParam(
-        top_k=10,
-        level=0,
-        response_type="multiple paragraphs",
-        local_max_token_for_community_report=3000,
-        local_max_token_for_text_unit=3000,
-        local_max_token_for_local_context=4000,
-        local_community_single_one=False,
-        global_max_token_for_community_report=3000,
-        global_max_consider_community=10,
-        global_min_community_rating=0,
-        naive_max_token_for_text_unit=3000,
-        only_need_context=False
-    )
+    return QueryParam()
 
 
 @pytest.fixture

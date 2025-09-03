@@ -15,7 +15,7 @@ from .base import (
 )
 from .prompt import PROMPTS
 # Import shared helper from extraction module
-from .extraction import _handle_entity_relation_summary
+from ._extraction import _handle_entity_relation_summary
 
 
 def _pack_single_community_by_sub_communities(
@@ -70,12 +70,15 @@ async def _pack_single_community_describe(
     community: SingleCommunitySchema,
     tokenizer_wrapper: "TokenizerWrapper",
     max_token_size: int = 12000,
-    already_reports: dict[str, CommunitySchema] = {},
-    global_config: dict = {},
+    already_reports: dict[str, CommunitySchema] = None,
+    global_config: dict = None,
 ) -> str:
-
+    # Fix mutable default arguments
+    if already_reports is None:
+        already_reports = {}
+    if global_config is None:
+        global_config = {}
     
-
     # 1. 准备原始数据
     nodes_in_order = sorted(community["nodes"])
     edges_in_order = sorted(community["edges"], key=lambda x: x[0] + x[1])
@@ -336,7 +339,8 @@ async def summarize_community(
             nodes_data.append(node)
             # Get edges from this node
             edges = await graph.get_node_edges(node_id)
-            edges_data.extend(edges)
+            if edges:
+                edges_data.extend(edges)
     
     # Build description
     description_parts = []
@@ -358,8 +362,8 @@ async def summarize_community(
     describe = "\n".join(description_parts)
     
     # Generate summary
-    prompt = PROMPTS.get("community_report", "Summarize this community:\n{describe}")
-    response = await model_func(prompt.format(describe=describe))
+    prompt = PROMPTS.get("community_report", "Summarize this community:\n{input_text}")
+    response = await model_func(prompt.format(input_text=describe))
     
     # Try to parse as JSON, otherwise use as text
     try:

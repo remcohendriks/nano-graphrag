@@ -1,9 +1,9 @@
 """Test chunking operations."""
 
 import pytest
-from nano_graphrag.chunking import (
+from nano_graphrag._chunking import (
     chunking_by_token_size,
-    chunking_by_seperators,
+    chunking_by_separators,
     get_chunks,
     get_chunks_v2
 )
@@ -54,7 +54,7 @@ class TestChunking:
         tokens = [tokenizer.encode(text)]
         doc_keys = ["doc-1"]
         
-        chunks = chunking_by_seperators(
+        chunks = chunking_by_separators(
             tokens, doc_keys, tokenizer,
             overlap_token_size=5, max_token_size=50
         )

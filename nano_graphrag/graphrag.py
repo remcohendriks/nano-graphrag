@@ -7,20 +7,20 @@ from typing import Dict, List, Optional, Union, cast
 
 from .config import GraphRAGConfig
 from .llm.providers import get_llm_provider, get_embedding_provider
-from .chunking import (
+from ._chunking import (
     chunking_by_token_size,
     get_chunks,
     get_chunks_v2,
 )
-from .extraction import (
+from ._extraction import (
     extract_entities,
     extract_entities_from_chunks,
 )
-from .community import (
+from ._community import (
     generate_community_report,
     summarize_community,
 )
-from .query import (
+from ._query import (
     local_query,
     global_query,
     naive_query,

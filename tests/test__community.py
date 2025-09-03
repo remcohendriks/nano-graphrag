@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from nano_graphrag.community import (
+from nano_graphrag._community import (
     _pack_single_community_by_sub_communities,
     _community_report_json_to_str,
     summarize_community
@@ -57,8 +57,8 @@ class TestCommunity:
         
         describe, token_count, nodes, edges = result
         
-        # Check CSV format
-        assert "id,report,rating,importance" in describe
+        # Check CSV format (uses comma+tab delimiter)
+        assert '"id",\t"report",\t"rating",\t"importance"' in describe
         assert "Report 1" in describe
         assert "Report 2" in describe
         
