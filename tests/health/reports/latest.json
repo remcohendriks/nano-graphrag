@@ -1,5 +1,34 @@
 [
   {
+    "timestamp": "2025-09-04T17:02:37.993747+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "status": "failed",
+    "timings": {
+      "global_query": 0.029967069625854492,
+      "local_query": 11.551758289337158,
+      "naive_query": 0.6425693035125732,
+      "reload": 0.020824909210205078,
+      "total": 140.57242703437805
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: Request timed out"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
     "timestamp": "2025-09-03T19:38:16.352997+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",
