@@ -358,7 +358,7 @@ class GraphRAG:
     def _global_config(self) -> dict:
         """Build global config with all required fields including function references."""
         return {
-            **self.config.to_dict(),
+            **self.config.to_legacy_dict(),
             "best_model_func": self.best_model_func,
             "cheap_model_func": self.cheap_model_func,
             "convert_response_to_json_func": self.convert_response_to_json_func,
