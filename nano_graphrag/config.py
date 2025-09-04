@@ -71,6 +71,18 @@ class EmbeddingConfig:
 
 
 @dataclass(frozen=True)
+class Node2VecConfig:
+    """Node2Vec parameters for graph embeddings."""
+    enabled: bool = False  # Allow disabling for Neo4j/Qdrant
+    dimensions: int = 128
+    num_walks: int = 10
+    walk_length: int = 40
+    window_size: int = 2
+    iterations: int = 3
+    random_seed: int = 3
+
+
+@dataclass(frozen=True)
 class StorageConfig:
     """Storage backend configuration."""
     vector_backend: str = "nano"  # nano, hnswlib, milvus, qdrant
@@ -83,6 +95,9 @@ class StorageConfig:
     hnsw_ef_search: int = 50
     hnsw_m: int = 16
     hnsw_max_elements: int = 1_000_000
+    
+    # Node2Vec configuration (for NetworkX backend)
+    node2vec: Node2VecConfig = field(default_factory=lambda: Node2VecConfig(enabled=True))
     
     @classmethod
     def from_env(cls) -> 'StorageConfig':
@@ -242,7 +257,58 @@ class GraphRAGConfig:
         )
     
     def to_dict(self) -> dict:
-        """Convert config to dictionary for compatibility."""
+        """Convert config to clean dictionary for active configuration.
+        
+        Returns only actively used configuration parameters.
+        For backward compatibility with legacy code, use to_legacy_dict().
+        """
+        config_dict = {
+            'working_dir': self.storage.working_dir,
+            'enable_local': self.query.enable_local,
+            'enable_naive_rag': self.query.enable_naive_rag,
+            'chunk_token_size': self.chunking.size,
+            'chunk_overlap_token_size': self.chunking.overlap,
+            'entity_extract_max_gleaning': self.entity_extraction.max_gleaning,
+            'entity_summary_to_max_tokens': self.entity_extraction.summary_max_tokens,
+            'graph_cluster_algorithm': self.graph_clustering.algorithm,
+            'max_graph_cluster_size': self.graph_clustering.max_cluster_size,
+            'graph_cluster_seed': self.graph_clustering.seed,
+            'embedding_batch_num': self.embedding.batch_size,
+            'embedding_func_max_async': self.embedding.max_concurrent,
+            'query_better_than_threshold': self.query.similarity_threshold,
+            'best_model_max_token_size': self.llm.max_tokens,
+            'best_model_max_async': self.llm.max_concurrent,
+            'enable_llm_cache': self.llm.cache_enabled,
+        }
+        
+        # Add storage-specific configuration
+        if self.storage.vector_backend == "hnswlib":
+            config_dict['vector_db_storage_cls_kwargs'] = {
+                'ef_construction': self.storage.hnsw_ef_construction,
+                'ef_search': self.storage.hnsw_ef_search,
+                'M': self.storage.hnsw_m,
+                'max_elements': self.storage.hnsw_max_elements,
+            }
+        
+        # Add node2vec configuration if enabled and using NetworkX
+        if self.storage.graph_backend == "networkx" and self.storage.node2vec.enabled:
+            config_dict['node2vec_params'] = {
+                'dimensions': self.storage.node2vec.dimensions,
+                'num_walks': self.storage.node2vec.num_walks,
+                'walk_length': self.storage.node2vec.walk_length,
+                'window_size': self.storage.node2vec.window_size,
+                'iterations': self.storage.node2vec.iterations,
+                'random_seed': self.storage.node2vec.random_seed,
+            }
+        
+        return config_dict
+    
+    def to_legacy_dict(self) -> dict:
+        """Convert config to dictionary with full legacy compatibility.
+        
+        This method maintains backward compatibility with all legacy code.
+        New code should use to_dict() instead.
+        """
         config_dict = {
             'working_dir': self.storage.working_dir,
             'enable_local': self.query.enable_local,
@@ -289,3 +355,30 @@ class GraphRAGConfig:
             }
         
         return config_dict
+
+
+def validate_config(config: GraphRAGConfig) -> list[str]:
+    """Validate configuration and return list of warnings.
+    
+    Args:
+        config: GraphRAG configuration to validate
+        
+    Returns:
+        List of warning messages (empty if no issues)
+    """
+    warnings = []
+    
+    # Check for common misconfigurations
+    if config.storage.vector_backend == "hnswlib" and config.storage.hnsw_ef_search > 500:
+        warnings.append(f"Very high ef_search ({config.storage.hnsw_ef_search}) may impact performance")
+    
+    if config.llm.max_concurrent > 100:
+        warnings.append(f"Very high max_concurrent ({config.llm.max_concurrent}) may hit rate limits")
+    
+    if config.embedding.max_concurrent > 100:
+        warnings.append(f"Very high embedding max_concurrent ({config.embedding.max_concurrent}) may hit rate limits")
+    
+    if config.storage.hnsw_ef_construction < config.storage.hnsw_ef_search:
+        warnings.append(f"ef_construction ({config.storage.hnsw_ef_construction}) should be >= ef_search ({config.storage.hnsw_ef_search})")
+    
+    return warnings

@@ -13,6 +13,7 @@ from nano_graphrag.config import (
     GraphClusteringConfig,
     QueryConfig,
     GraphRAGConfig,
+    validate_config,
 )
 
 
@@ -337,3 +338,67 @@ class TestGraphRAGConfig:
         config = GraphRAGConfig()
         with pytest.raises(AttributeError):
             config.llm = LLMConfig(provider="azure")
+    
+    def test_backward_compatibility(self):
+        """Test that to_legacy_dict maintains backward compatibility."""
+        config = GraphRAGConfig()
+        legacy_dict = config.to_legacy_dict()
+        
+        # Check all legacy fields are present
+        assert "node_embedding_algorithm" in legacy_dict
+        assert legacy_dict["node_embedding_algorithm"] == "node2vec"
+        assert "node2vec_params" in legacy_dict
+        assert legacy_dict["node2vec_params"]["dimensions"] == config.embedding.dimension
+        assert "always_create_working_dir" in legacy_dict
+        assert "addon_params" in legacy_dict
+        assert "tokenizer_type" in legacy_dict
+        assert "tiktoken_model_name" in legacy_dict
+        assert "huggingface_model_name" in legacy_dict
+        assert "cheap_model_max_token_size" in legacy_dict
+        assert "cheap_model_max_async" in legacy_dict
+        
+        # Check clean to_dict() doesn't have legacy fields
+        clean_dict = config.to_dict()
+        assert "node_embedding_algorithm" not in clean_dict
+        assert "always_create_working_dir" not in clean_dict
+        assert "addon_params" not in clean_dict
+        assert "tokenizer_type" not in clean_dict
+        assert "tiktoken_model_name" not in clean_dict
+        assert "huggingface_model_name" not in clean_dict
+        assert "cheap_model_max_token_size" not in clean_dict
+        assert "cheap_model_max_async" not in clean_dict
+
+
+class TestConfigValidation:
+    """Test configuration validation."""
+    
+    def test_validate_valid_config(self):
+        """Test validation with valid config."""
+        config = GraphRAGConfig()
+        warnings = validate_config(config)
+        assert len(warnings) == 0
+    
+    
+    def test_validate_high_concurrent_warning(self):
+        """Test warning for high concurrent connections."""
+        config = GraphRAGConfig(
+            llm=LLMConfig(max_concurrent=150),
+            embedding=EmbeddingConfig(max_concurrent=150)
+        )
+        warnings = validate_config(config)
+        assert len(warnings) == 2
+        assert any("max_concurrent" in w for w in warnings)
+    
+    def test_validate_hnsw_warning(self):
+        """Test warning for HNSW configuration issues."""
+        config = GraphRAGConfig(
+            storage=StorageConfig(
+                vector_backend="hnswlib",
+                hnsw_ef_search=600,
+                hnsw_ef_construction=50
+            )
+        )
+        warnings = validate_config(config)
+        assert len(warnings) == 2
+        assert any("ef_search" in w for w in warnings)
+        assert any("ef_construction" in w for w in warnings)
