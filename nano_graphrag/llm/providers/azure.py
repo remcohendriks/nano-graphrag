@@ -126,14 +126,21 @@ class AzureOpenAIEmbeddingProvider(BaseEmbeddingProvider):
         return np.array([dp.embedding for dp in response.data])
 
 
+from ..._utils import deprecated_llm_function
+
 # Backward compatibility functions
+@deprecated_llm_function("nano_graphrag.llm.providers.AzureOpenAIProvider")
 async def azure_gpt_4o_complete(
     prompt: str,
     system_prompt: Optional[str] = None,
     history_messages: Optional[List[Dict[str, str]]] = None,
     **kwargs
 ) -> str:
-    """Backward compatible Azure GPT-4o completion."""
+    """Backward compatible Azure GPT-4o completion.
+    
+    DEPRECATED: Use AzureOpenAIProvider instead.
+    This function will be removed in v0.2.0.
+    """
     provider = AzureOpenAIProvider(model="gpt-5")
     return await provider.complete_with_cache(
         prompt, system_prompt, history_messages,
@@ -142,13 +149,18 @@ async def azure_gpt_4o_complete(
     )
 
 
+@deprecated_llm_function("nano_graphrag.llm.providers.AzureOpenAIProvider")
 async def azure_gpt_4o_mini_complete(
     prompt: str,
     system_prompt: Optional[str] = None,
     history_messages: Optional[List[Dict[str, str]]] = None,
     **kwargs
 ) -> str:
-    """Backward compatible Azure GPT-4o-mini completion."""
+    """Backward compatible Azure GPT-4o-mini completion.
+    
+    DEPRECATED: Use AzureOpenAIProvider instead.
+    This function will be removed in v0.2.0.
+    """
     provider = AzureOpenAIProvider(model="gpt-5-mini")
     return await provider.complete_with_cache(
         prompt, system_prompt, history_messages,
@@ -157,7 +169,12 @@ async def azure_gpt_4o_mini_complete(
     )
 
 
+@deprecated_llm_function("nano_graphrag.llm.providers.AzureOpenAIEmbeddingProvider")
 async def azure_openai_embedding(texts: List[str]) -> np.ndarray:
-    """Backward compatible Azure OpenAI embedding."""
+    """Backward compatible Azure OpenAI embedding.
+    
+    DEPRECATED: Use AzureOpenAIEmbeddingProvider instead.
+    This function will be removed in v0.2.0.
+    """
     provider = AzureOpenAIEmbeddingProvider()
     return await provider.embed(texts)

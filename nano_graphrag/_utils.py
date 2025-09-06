@@ -5,10 +5,11 @@ import logging
 import os
 import re
 import numbers
+import warnings
 from dataclasses import dataclass
 from functools import wraps
 from hashlib import md5
-from typing import Any, Union, Literal
+from typing import Any, Union, Literal, Callable, Optional
 
 import numpy as np
 import tiktoken
@@ -18,6 +19,50 @@ from transformers import AutoTokenizer
 
 logger = logging.getLogger("nano-graphrag")
 logging.getLogger("neo4j").setLevel(logging.ERROR)
+
+# Track which functions have already shown deprecation warnings
+_deprecation_warnings_shown = set()
+
+def deprecated_llm_function(replacement: str, removal_version: str = "0.2.0") -> Callable:
+    """Decorator to mark LLM functions as deprecated.
+    
+    Args:
+        replacement: The recommended replacement function/class to use
+        removal_version: Version when the deprecated function will be removed
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            func_name = f"{func.__module__}.{func.__name__}"
+            if func_name not in _deprecation_warnings_shown:
+                warnings.warn(
+                    f"{func.__name__} is deprecated and will be removed in v{removal_version}. "
+                    f"Use {replacement} instead.",
+                    DeprecationWarning,
+                    stacklevel=2
+                )
+                _deprecation_warnings_shown.add(func_name)
+            return await func(*args, **kwargs)
+        
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            func_name = f"{func.__module__}.{func.__name__}"
+            if func_name not in _deprecation_warnings_shown:
+                warnings.warn(
+                    f"{func.__name__} is deprecated and will be removed in v{removal_version}. "
+                    f"Use {replacement} instead.",
+                    DeprecationWarning,
+                    stacklevel=2
+                )
+                _deprecation_warnings_shown.add(func_name)
+            return func(*args, **kwargs)
+        
+        # Return appropriate wrapper based on function type
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
+    return decorator
 
 def always_get_an_event_loop() -> asyncio.AbstractEventLoop:
     try:

@@ -1,5 +1,61 @@
 [
   {
+    "timestamp": "2025-09-06T20:50:59.190639+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "status": "passed",
+    "timings": {
+      "insert": 165.35602188110352,
+      "global_query": 20.996641159057617,
+      "local_query": 10.44421935081482,
+      "naive_query": 6.963961124420166,
+      "reload": 7.009675025939941,
+      "total": 210.99118876457214
+    },
+    "counts": {
+      "nodes": 79,
+      "edges": 89,
+      "communities": 13,
+      "chunks": 14
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-06T20:43:38.318832+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "status": "passed",
+    "timings": {
+      "insert": 32.75742292404175,
+      "global_query": 22.539016246795654,
+      "local_query": 11.882128953933716,
+      "naive_query": 0.33211374282836914,
+      "reload": 6.264001131057739,
+      "total": 74.02164769172668
+    },
+    "counts": {
+      "nodes": 141,
+      "edges": 164,
+      "communities": 31,
+      "chunks": 28
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
     "timestamp": "2025-09-04T17:02:37.993747+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",

@@ -351,14 +351,21 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
         )
 
 
+from ..._utils import deprecated_llm_function
+
 # Factory functions for backward compatibility
+@deprecated_llm_function("nano_graphrag.llm.providers.OpenAIProvider")
 async def gpt_4o_complete(
     prompt: str,
     system_prompt: Optional[str] = None,
     history_messages: Optional[List[Dict[str, str]]] = None,
     **kwargs
 ) -> str:
-    """Backward compatible function for gpt-4o completions."""
+    """Backward compatible function for gpt-4o completions.
+    
+    DEPRECATED: Use OpenAIProvider instead.
+    This function will be removed in v0.2.0.
+    """
     provider = OpenAIProvider(model="gpt-5")
     return await provider.complete_with_cache(
         prompt, system_prompt, history_messages, 
@@ -367,13 +374,18 @@ async def gpt_4o_complete(
     )
 
 
+@deprecated_llm_function("nano_graphrag.llm.providers.OpenAIProvider")
 async def gpt_4o_mini_complete(
     prompt: str,
     system_prompt: Optional[str] = None,
     history_messages: Optional[List[Dict[str, str]]] = None,
     **kwargs
 ) -> str:
-    """Backward compatible function for gpt-4o-mini completions."""
+    """Backward compatible function for gpt-4o-mini completions.
+    
+    DEPRECATED: Use OpenAIProvider instead.
+    This function will be removed in v0.2.0.
+    """
     provider = OpenAIProvider(model="gpt-5-mini")
     return await provider.complete_with_cache(
         prompt, system_prompt, history_messages,
@@ -382,8 +394,13 @@ async def gpt_4o_mini_complete(
     )
 
 
+@deprecated_llm_function("nano_graphrag.llm.providers.OpenAIEmbeddingProvider")
 async def openai_embedding(texts: List[str]) -> np.ndarray:
-    """Backward compatible OpenAI embedding function."""
+    """Backward compatible OpenAI embedding function.
+    
+    DEPRECATED: Use OpenAIEmbeddingProvider instead.
+    This function will be removed in v0.2.0.
+    """
     provider = OpenAIEmbeddingProvider()
     response = await provider.embed(texts)
     return response["embeddings"]
