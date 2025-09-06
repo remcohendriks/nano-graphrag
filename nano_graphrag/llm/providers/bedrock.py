@@ -13,7 +13,7 @@ from tenacity import (
 )
 
 from ..base import BaseLLMProvider, BaseEmbeddingProvider
-from ..._utils import wrap_embedding_func_with_attrs
+from ..._utils import wrap_embedding_func_with_attrs, deprecated_llm_function
 
 
 class BedrockProvider(BaseLLMProvider):
@@ -129,8 +129,6 @@ class BedrockEmbeddingProvider(BaseEmbeddingProvider):
         
         return np.array([dp["embedding"] for dp in embeddings])
 
-
-from ..._utils import deprecated_llm_function
 
 @deprecated_llm_function("nano_graphrag.llm.providers.BedrockProvider")
 def create_amazon_bedrock_complete_function(model_id: str):

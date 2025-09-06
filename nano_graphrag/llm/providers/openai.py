@@ -27,6 +27,7 @@ from ..base import (
     LLMServerError,
     LLMBadRequestError
 )
+from ..._utils import deprecated_llm_function
 
 
 class OpenAIProvider(BaseLLMProvider):
@@ -350,8 +351,6 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
             }
         )
 
-
-from ..._utils import deprecated_llm_function
 
 # Factory functions for backward compatibility
 @deprecated_llm_function("nano_graphrag.llm.providers.OpenAIProvider")

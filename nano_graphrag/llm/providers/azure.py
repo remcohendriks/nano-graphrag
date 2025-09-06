@@ -12,7 +12,7 @@ from tenacity import (
 )
 
 from ..base import BaseLLMProvider, BaseEmbeddingProvider
-from ..._utils import wrap_embedding_func_with_attrs
+from ..._utils import wrap_embedding_func_with_attrs, deprecated_llm_function
 
 
 class AzureOpenAIProvider(BaseLLMProvider):
@@ -125,8 +125,6 @@ class AzureOpenAIEmbeddingProvider(BaseEmbeddingProvider):
         )
         return np.array([dp.embedding for dp in response.data])
 
-
-from ..._utils import deprecated_llm_function
 
 # Backward compatibility functions
 @deprecated_llm_function("nano_graphrag.llm.providers.AzureOpenAIProvider")
