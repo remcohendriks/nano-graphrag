@@ -2,10 +2,18 @@
 
 This module defines type-safe schemas for nodes, edges, chunks, communities,
 and other core data structures used throughout the system.
+
+Architecture:
+- Storage Layer: NodeData/EdgeData - raw database records without IDs
+  (IDs are keys in storage, not fields in the data)
+- View Layer: NodeView/EdgeView - enriched with IDs and parsed fields
+- Transformation: Storage -> View happens at query boundaries
+Note: entity_name is the node ID (key), not a field in NodeData
 """
 
-from typing import TypedDict, Optional, List, Dict, Any, Literal, TypeGuard
+from typing import TypedDict, Optional, List, Dict, Any, Literal, TypeGuard, Union
 import numpy as np
+from .prompt import GRAPH_FIELD_SEP
 
 
 # Storage layer schemas - reflect actual database structure
@@ -68,8 +76,8 @@ class EdgeView(TypedDict):
 
 class EntityExtractionResult(TypedDict):
     """Result from entity extraction process."""
-    entities: List[Dict[str, Any]]  # Will be NodeData-compatible dicts
-    relationships: List[Dict[str, Any]]  # Will be EdgeData-compatible dicts
+    entities: List[Union[NodeData, Dict[str, Any]]]  # NodeData-compatible dicts
+    relationships: List[Union[EdgeData, Dict[str, Any]]]  # EdgeData-compatible dicts
     chunk_id: str
 
 
@@ -184,19 +192,25 @@ class CommunityReportData(TypedDict, total=False):
 def is_valid_node_data(data: Dict[str, Any]) -> TypeGuard[NodeData]:
     """Validate that dict conforms to NodeData schema.
     
-    Checks for minimum required fields for node storage.
+    Checks that data is a dict with only allowed NodeData fields.
     """
-    # Current storage doesn't require all fields
-    return isinstance(data, dict)
+    if not isinstance(data, dict):
+        return False
+    # Check that all keys are valid NodeData fields
+    allowed_fields = {"entity_type", "description", "source_id"}
+    return all(key in allowed_fields for key in data.keys())
 
 
 def is_valid_edge_data(data: Dict[str, Any]) -> TypeGuard[EdgeData]:
     """Validate that dict conforms to EdgeData schema.
     
-    Checks for minimum required fields for edge storage.
+    Checks that data is a dict with only allowed EdgeData fields.
     """
-    # Current storage builds these fields dynamically
-    return isinstance(data, dict)
+    if not isinstance(data, dict):
+        return False
+    # Check that all keys are valid EdgeData fields
+    allowed_fields = {"weight", "description", "source_id", "order"}
+    return all(key in allowed_fields for key in data.keys())
 
 
 def is_valid_llm_message(msg: Dict[str, Any]) -> TypeGuard[LLMMessage]:
@@ -248,31 +262,35 @@ def validate_relationship_record(record: Dict[str, Any]) -> RelationshipRecord:
     )
 
 
-def parse_source_id(source_id: str, separator: str = "<SEP>") -> List[str]:
+def parse_source_id(source_id: str, separator: str = None) -> List[str]:
     """Parse source_id field into list of chunk IDs.
     
     Args:
         source_id: Concatenated source IDs
-        separator: Field separator (default: GRAPH_FIELD_SEP)
+        separator: Field separator (default: GRAPH_FIELD_SEP from prompt.py)
     
     Returns:
         List of individual chunk IDs
     """
+    if separator is None:
+        separator = GRAPH_FIELD_SEP
     if not source_id:
         return []
     return source_id.split(separator)
 
 
-def build_source_id(chunk_ids: List[str], separator: str = "<SEP>") -> str:
+def build_source_id(chunk_ids: List[str], separator: str = None) -> str:
     """Build source_id field from list of chunk IDs.
     
     Args:
         chunk_ids: List of chunk IDs
-        separator: Field separator (default: GRAPH_FIELD_SEP)
+        separator: Field separator (default: GRAPH_FIELD_SEP from prompt.py)
     
     Returns:
         Concatenated source ID string
     """
+    if separator is None:
+        separator = GRAPH_FIELD_SEP
     return separator.join(chunk_ids)
 
 

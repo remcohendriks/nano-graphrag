@@ -73,10 +73,12 @@ class TestNodeSchemas:
         """Test node validation function."""
         valid_node = {"entity_type": "Test"}
         empty_dict = {}
+        invalid_node = {"unknown_field": "value"}
         
-        # Current implementation accepts any dict
+        # Only accepts dicts with valid NodeData fields
         assert is_valid_node_data(valid_node) is True
-        assert is_valid_node_data(empty_dict) is True
+        assert is_valid_node_data(empty_dict) is True  # Empty is valid
+        assert is_valid_node_data(invalid_node) is False  # Unknown field
         assert is_valid_node_data(None) is False
 
 
@@ -115,10 +117,12 @@ class TestEdgeSchemas:
         """Test edge validation function."""
         valid_edge = {"weight": 1.0}
         empty_dict = {}
+        invalid_edge = {"unknown_field": "value"}
         
-        # Current implementation accepts any dict
+        # Only accepts dicts with valid EdgeData fields
         assert is_valid_edge_data(valid_edge) is True
-        assert is_valid_edge_data(empty_dict) is True
+        assert is_valid_edge_data(empty_dict) is True  # Empty is valid
+        assert is_valid_edge_data(invalid_edge) is False  # Unknown field
         assert is_valid_edge_data(None) is False
 
 
@@ -354,8 +358,10 @@ class TestUtilityFunctions:
     
     def test_parse_source_id(self):
         """Test parse_source_id function."""
-        # Default separator
-        source_id = "chunk1<SEP>chunk2<SEP>chunk3"
+        from nano_graphrag.prompt import GRAPH_FIELD_SEP
+        
+        # Default separator (uses GRAPH_FIELD_SEP)
+        source_id = f"chunk1{GRAPH_FIELD_SEP}chunk2{GRAPH_FIELD_SEP}chunk3"
         result = parse_source_id(source_id)
         assert result == ["chunk1", "chunk2", "chunk3"]
         
@@ -369,10 +375,12 @@ class TestUtilityFunctions:
     
     def test_build_source_id(self):
         """Test build_source_id function."""
-        # Default separator
+        from nano_graphrag.prompt import GRAPH_FIELD_SEP
+        
+        # Default separator (uses GRAPH_FIELD_SEP)
         chunks = ["chunk1", "chunk2", "chunk3"]
         result = build_source_id(chunks)
-        assert result == "chunk1<SEP>chunk2<SEP>chunk3"
+        assert result == f"chunk1{GRAPH_FIELD_SEP}chunk2{GRAPH_FIELD_SEP}chunk3"
         
         # Custom separator
         result = build_source_id(chunks, separator="|")
