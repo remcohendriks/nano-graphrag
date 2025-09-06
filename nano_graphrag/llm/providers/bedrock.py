@@ -13,7 +13,7 @@ from tenacity import (
 )
 
 from ..base import BaseLLMProvider, BaseEmbeddingProvider
-from ..._utils import wrap_embedding_func_with_attrs
+from ..._utils import wrap_embedding_func_with_attrs, deprecated_llm_function
 
 
 class BedrockProvider(BaseLLMProvider):
@@ -130,8 +130,13 @@ class BedrockEmbeddingProvider(BaseEmbeddingProvider):
         return np.array([dp["embedding"] for dp in embeddings])
 
 
+@deprecated_llm_function("nano_graphrag.llm.providers.BedrockProvider")
 def create_amazon_bedrock_complete_function(model_id: str):
-    """Factory function for creating Bedrock completion functions."""
+    """Factory function for creating Bedrock completion functions.
+    
+    DEPRECATED: Use BedrockProvider directly instead.
+    This function will be removed in v0.2.0.
+    """
     async def bedrock_complete(
         prompt: str,
         system_prompt: Optional[str] = None,
@@ -149,7 +154,12 @@ def create_amazon_bedrock_complete_function(model_id: str):
     return bedrock_complete
 
 
+@deprecated_llm_function("nano_graphrag.llm.providers.BedrockEmbeddingProvider")
 async def amazon_bedrock_embedding(texts: List[str]) -> np.ndarray:
-    """Backward compatible Amazon Bedrock embedding."""
+    """Backward compatible Amazon Bedrock embedding.
+    
+    DEPRECATED: Use BedrockEmbeddingProvider instead.
+    This function will be removed in v0.2.0.
+    """
     provider = BedrockEmbeddingProvider()
     return await provider.embed(texts)
