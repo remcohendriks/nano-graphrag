@@ -7,6 +7,7 @@ from typing import AsyncIterator, Dict, List, Optional, Any, TypedDict, Union
 import numpy as np
 from ..base import BaseKVStorage
 from .._utils import compute_args_hash
+from ..schemas import LLMMessage
 
 
 # Vendor-neutral parameter definitions
@@ -111,7 +112,7 @@ class BaseLLMProvider(ABC):
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: Optional[List[LLMMessage]] = None,
         params: Optional[CompletionParams] = None,
         timeout: Optional[float] = None,
         **kwargs
@@ -143,7 +144,7 @@ class BaseLLMProvider(ABC):
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: Optional[List[LLMMessage]] = None,
         params: Optional[CompletionParams] = None,
         timeout: Optional[float] = None,
         **kwargs
@@ -184,7 +185,7 @@ class BaseLLMProvider(ABC):
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: Optional[List[LLMMessage]] = None,
         hashing_kv: Optional[BaseKVStorage] = None,
         params: Optional[CompletionParams] = None,
         timeout: Optional[float] = None,
@@ -213,7 +214,7 @@ class BaseLLMProvider(ABC):
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: Optional[List[LLMMessage]] = None,
         hashing_kv: Optional[BaseKVStorage] = None,
         params: Optional[CompletionParams] = None,
         timeout: Optional[float] = None,
@@ -243,10 +244,10 @@ class BaseLLMProvider(ABC):
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None
-    ) -> List[Dict[str, str]]:
+        history: Optional[List[LLMMessage]] = None
+    ) -> List[LLMMessage]:
         """Build message list for API calls."""
-        messages = []
+        messages: List[LLMMessage] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         if history:

@@ -2,7 +2,7 @@
 
 import re
 import asyncio
-from typing import Union
+from typing import Union, Dict, List, Optional, Any, Tuple
 from collections import Counter, defaultdict
 from ._utils import (
     logger,
@@ -19,6 +19,7 @@ from .base import (
     TextChunkSchema,
 )
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
+from .schemas import NodeData, EdgeData, ExtractionRecord, RelationshipRecord
 
 
 async def _handle_entity_relation_summary(
@@ -49,9 +50,9 @@ async def _handle_entity_relation_summary(
 
 
 async def _handle_single_entity_extraction(
-    record_attributes: list[str],
+    record_attributes: List[str],
     chunk_key: str,
-):
+) -> Optional[Dict[str, Any]]:
     if len(record_attributes) < 4 or record_attributes[0] != '"entity"':
         return None
     # add this record as a node in the G
@@ -70,9 +71,9 @@ async def _handle_single_entity_extraction(
 
 
 async def _handle_single_relationship_extraction(
-    record_attributes: list[str],
+    record_attributes: List[str],
     chunk_key: str,
-):
+) -> Optional[Dict[str, Any]]:
     if len(record_attributes) < 5 or record_attributes[0] != '"relationship"':
         return None
     # add this record as edge
@@ -94,11 +95,11 @@ async def _handle_single_relationship_extraction(
 
 async def _merge_nodes_then_upsert(
     entity_name: str,
-    nodes_data: list[dict],
+    nodes_data: List[Dict[str, Any]],
     knwoledge_graph_inst: BaseGraphStorage,
-    global_config: dict,
-    tokenizer_wrapper,
-):
+    global_config: Dict[str, Any],
+    tokenizer_wrapper: TokenizerWrapper,
+) -> Dict[str, Any]:
     already_entitiy_types = []
     already_source_ids = []
     already_description = []
@@ -143,11 +144,11 @@ async def _merge_nodes_then_upsert(
 async def _merge_edges_then_upsert(
     src_id: str,
     tgt_id: str,
-    edges_data: list[dict],
+    edges_data: List[Dict[str, Any]],
     knwoledge_graph_inst: BaseGraphStorage,
-    global_config: dict,
-    tokenizer_wrapper,
-):
+    global_config: Dict[str, Any],
+    tokenizer_wrapper: TokenizerWrapper,
+) -> None:
     already_weights = []
     already_source_ids = []
     already_description = []
@@ -193,13 +194,13 @@ async def _merge_edges_then_upsert(
 
 
 async def extract_entities(
-    chunks: dict[str, TextChunkSchema],
+    chunks: Dict[str, TextChunkSchema],
     knwoledge_graph_inst: BaseGraphStorage,
     entity_vdb: BaseVectorStorage,
-    tokenizer_wrapper,
-    global_config: dict,
+    tokenizer_wrapper: TokenizerWrapper,
+    global_config: Dict[str, Any],
     using_amazon_bedrock: bool=False,
-) -> Union[BaseGraphStorage, None]:
+) -> Optional[BaseGraphStorage]:
     use_llm_func: callable = global_config["best_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
 
@@ -219,7 +220,7 @@ async def extract_entities(
     already_entities = 0
     already_relations = 0
 
-    async def _process_single_content(chunk_key_dp: tuple[str, TextChunkSchema]):
+    async def _process_single_content(chunk_key_dp: Tuple[str, TextChunkSchema]) -> Tuple[Dict[str, List], Dict[Tuple[str, str], List]]:
         nonlocal already_processed, already_entities, already_relations
         chunk_key = chunk_key_dp[0]
         chunk_dp = chunk_key_dp[1]
@@ -330,13 +331,13 @@ async def extract_entities(
 
 
 async def extract_entities_from_chunks(
-    chunks: list[TextChunkSchema],
+    chunks: List[TextChunkSchema],
     model_func: callable,
     tokenizer_wrapper: TokenizerWrapper,
     max_gleaning: int = 1,
     summary_max_tokens: int = 500,
-    to_json_func: callable = None
-) -> dict:
+    to_json_func: Optional[callable] = None
+) -> Dict[str, List[Dict[str, Any]]]:
     """Extract entities from chunks without storage side effects.
     
     Args:

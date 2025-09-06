@@ -2,6 +2,7 @@
 
 import json
 import asyncio
+from typing import Dict, List, Optional, Any, Tuple
 from collections import Counter
 from ._utils import (
     logger,
@@ -19,14 +20,15 @@ from .base import (
     QueryParam,
 )
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
+from .schemas import LocalQueryContext, GlobalQueryContext, NodeView
 
 
 async def _find_most_related_community_from_entities(
-    node_datas: list[dict],
+    node_datas: List[Dict[str, Any]],
     query_param: QueryParam,
     community_reports: BaseKVStorage[CommunitySchema],
-    tokenizer_wrapper,
-):
+    tokenizer_wrapper: TokenizerWrapper,
+) -> List[CommunitySchema]:
     related_communities = []
     for node_d in node_datas:
         if "clusters" not in node_d:
@@ -70,12 +72,12 @@ async def _find_most_related_community_from_entities(
 
 
 async def _find_most_related_text_unit_from_entities(
-    node_datas: list[dict],
+    node_datas: List[Dict[str, Any]],
     query_param: QueryParam,
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     knowledge_graph_inst: BaseGraphStorage,
-    tokenizer_wrapper,
-):
+    tokenizer_wrapper: TokenizerWrapper,
+) -> List[TextChunkSchema]:
     
     text_units = [
         split_string_by_multi_markers(dp["source_id"], [GRAPH_FIELD_SEP])
@@ -261,14 +263,14 @@ async def _build_local_query_context(
 
 
 async def local_query(
-    query,
+    query: str,
     knowledge_graph_inst: BaseGraphStorage,
     entities_vdb: BaseVectorStorage,
     community_reports: BaseKVStorage[CommunitySchema],
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     query_param: QueryParam,
-    tokenizer_wrapper,
-    global_config: dict,
+    tokenizer_wrapper: TokenizerWrapper,
+    global_config: Dict[str, Any],
 ) -> str:
     use_model_func = global_config["best_model_func"]
     context = await _build_local_query_context(
@@ -297,11 +299,11 @@ async def local_query(
 
 async def _map_global_communities(
     query: str,
-    communities_data: list[CommunitySchema],
+    communities_data: List[CommunitySchema],
     query_param: QueryParam,
-    global_config: dict,
-    tokenizer_wrapper,
-):
+    global_config: Dict[str, Any],
+    tokenizer_wrapper: TokenizerWrapper,
+) -> List[List[Dict[str, Any]]]:
     use_string_json_convert_func = global_config["convert_response_to_json_func"]
     use_model_func = global_config["best_model_func"]
     community_groups = []
@@ -315,7 +317,7 @@ async def _map_global_communities(
         community_groups.append(this_group)
         communities_data = communities_data[len(this_group) :]
 
-    async def _process(community_truncated_datas: list[CommunitySchema]) -> dict:
+    async def _process(community_truncated_datas: List[CommunitySchema]) -> List[Dict[str, Any]]:
         communities_section_list = [["id", "content", "rating", "importance"]]
         for i, c in enumerate(community_truncated_datas):
             communities_section_list.append(
@@ -343,14 +345,14 @@ async def _map_global_communities(
 
 
 async def global_query(
-    query,
+    query: str,
     knowledge_graph_inst: BaseGraphStorage,
     entities_vdb: BaseVectorStorage,
     community_reports: BaseKVStorage[CommunitySchema],
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     query_param: QueryParam,
-    tokenizer_wrapper,
-    global_config: dict,
+    tokenizer_wrapper: TokenizerWrapper,
+    global_config: Dict[str, Any],
 ) -> str:
     community_schema = await knowledge_graph_inst.community_schema()
     community_schema = {
@@ -433,13 +435,13 @@ Importance Score: {dp['score']}
 
 
 async def naive_query(
-    query,
+    query: str,
     chunks_vdb: BaseVectorStorage,
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     query_param: QueryParam,
-    tokenizer_wrapper,
-    global_config: dict,
-):
+    tokenizer_wrapper: TokenizerWrapper,
+    global_config: Dict[str, Any],
+) -> str:
     use_model_func = global_config["best_model_func"]
     results = await chunks_vdb.query(query, top_k=query_param.top_k)
     if not len(results):
