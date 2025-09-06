@@ -1,6 +1,7 @@
 """Community detection and report generation for nano-graphrag."""
 
 import asyncio
+from typing import Dict, List, Optional, Any, Tuple, Set
 from ._utils import (
     logger,
     list_of_list_to_csv,
@@ -16,14 +17,15 @@ from .base import (
 from .prompt import PROMPTS
 # Import shared helper from extraction module
 from ._extraction import _handle_entity_relation_summary
+from .schemas import CommunityReportData
 
 
 def _pack_single_community_by_sub_communities(
     community: SingleCommunitySchema,
     max_token_size: int,
-    already_reports: dict[str, CommunitySchema],
+    already_reports: Dict[str, CommunitySchema],
     tokenizer_wrapper: TokenizerWrapper,
-) -> tuple[str, int, set, set]: 
+) -> Tuple[str, int, Set[str], Set[Tuple[str, str]]]: 
     all_sub_communities = [
         already_reports[k] for k in community["sub_communities"] if k in already_reports
     ]
@@ -68,10 +70,10 @@ def _pack_single_community_by_sub_communities(
 async def _pack_single_community_describe(
     knwoledge_graph_inst: BaseGraphStorage,
     community: SingleCommunitySchema,
-    tokenizer_wrapper: "TokenizerWrapper",
+    tokenizer_wrapper: TokenizerWrapper,
     max_token_size: int = 12000,
-    already_reports: dict[str, CommunitySchema] = None,
-    global_config: dict = None,
+    already_reports: Optional[Dict[str, CommunitySchema]] = None,
+    global_config: Optional[Dict[str, Any]] = None,
 ) -> str:
     # Fix mutable default arguments
     if already_reports is None:
@@ -233,8 +235,8 @@ async def generate_community_report(
     community_report_kv: BaseKVStorage[CommunitySchema],
     knwoledge_graph_inst: BaseGraphStorage,
     tokenizer_wrapper: TokenizerWrapper,
-    global_config: dict,
-):
+    global_config: Dict[str, Any],
+) -> None:
     llm_extra_kwargs = global_config["special_community_report_llm_kwargs"]
     use_llm_func: callable = global_config["best_model_func"]
     use_string_json_convert_func: callable = global_config["convert_response_to_json_func"]
@@ -248,8 +250,8 @@ async def generate_community_report(
     prompt_overhead = len(tokenizer_wrapper.encode(prompt_template.format(input_text="")))
 
     async def _form_single_community_report(
-        community: SingleCommunitySchema, already_reports: dict[str, CommunitySchema]
-    ):
+        community: SingleCommunitySchema, already_reports: Dict[str, CommunitySchema]
+    ) -> Dict[str, Any]:
         nonlocal already_processed
         describe = await _pack_single_community_describe(
             knwoledge_graph_inst,
@@ -305,7 +307,7 @@ async def generate_community_report(
 
 
 async def summarize_community(
-    node_ids: list[str],
+    node_ids: List[str],
     graph: BaseGraphStorage,
     model_func: callable,
     max_tokens: int = 2048,
