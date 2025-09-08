@@ -1,11 +1,13 @@
 import asyncio
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING, Optional
 import pickle
-import hnswlib
 import numpy as np
 import xxhash
+
+if TYPE_CHECKING:
+    import hnswlib
 
 from .._utils import logger
 from ..base import BaseVectorStorage
@@ -18,9 +20,27 @@ class HNSWVectorStorage(BaseVectorStorage):
     max_elements: int = 1000000
     ef_search: int = 50
     num_threads: int = -1
-    _index: Any = field(init=False)
+    _index: Optional[Any] = field(init=False, default=None)
     _metadata: dict[str, dict] = field(default_factory=dict)
     _current_elements: int = 0
+    _hnswlib_module: Optional[Any] = field(init=False, default=None)
+
+    @property
+    def hnswlib(self):
+        """Lazy load hnswlib module."""
+        if self._hnswlib_module is None:
+            try:
+                import hnswlib
+                self._hnswlib_module = hnswlib
+            except ImportError:
+                from .._utils import ensure_dependency
+                ensure_dependency(
+                    "hnswlib",
+                    "hnswlib",
+                    "HNSW vector storage"
+                )
+                raise  # Will never reach here
+        return self._hnswlib_module
 
     def __post_init__(self):
         self._index_file_name = os.path.join(
@@ -37,7 +57,7 @@ class HNSWVectorStorage(BaseVectorStorage):
         self.max_elements = hnsw_params.get("max_elements", self.max_elements)
         self.ef_search = hnsw_params.get("ef_search", self.ef_search)
         self.num_threads = hnsw_params.get("num_threads", self.num_threads)
-        self._index = hnswlib.Index(
+        self._index = self.hnswlib.Index(
             space="cosine", dim=self.embedding_func.embedding_dim
         )
 

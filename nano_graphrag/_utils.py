@@ -9,7 +9,7 @@ import warnings
 from dataclasses import dataclass
 from functools import wraps
 from hashlib import md5
-from typing import Any, Union, Literal, Callable, Optional
+from typing import Any, Union, Literal, Callable, Optional, Dict
 
 import numpy as np
 import tiktoken
@@ -348,3 +348,50 @@ def wrap_embedding_func_with_attrs(**kwargs):
         return new_func
 
     return final_decro
+
+
+def check_optional_dependencies() -> Dict[str, bool]:
+    """Check which optional dependencies are available.
+    
+    Returns:
+        Dictionary mapping package names to availability status
+    """
+    import importlib.util
+    
+    deps = {
+        "dspy": "dspy",  # Correct package name per official docs
+        "neo4j": "neo4j",
+        "hnswlib": "hnswlib",
+        "graspologic": "graspologic",
+        "openai": "openai",
+        "aioboto3": "aioboto3",
+    }
+    
+    available = {}
+    for module, package in deps.items():
+        spec = importlib.util.find_spec(module)
+        available[package] = spec is not None
+    
+    return available
+
+
+def ensure_dependency(module_name: str, package_name: str, purpose: str):
+    """Ensure a dependency is available or provide helpful error.
+    
+    Args:
+        module_name: Name of the module to import
+        package_name: Name of the package to install
+        purpose: What the dependency is needed for
+        
+    Raises:
+        ImportError: With helpful installation instructions
+    """
+    import importlib.util
+    
+    spec = importlib.util.find_spec(module_name)
+    if spec is None:
+        raise ImportError(
+            f"{package_name} is required for {purpose}.\n"
+            f"Install with: pip install {package_name}\n"
+            f"Or install all optional dependencies: pip install nano-graphrag[all]"
+        )

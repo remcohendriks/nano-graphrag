@@ -1,10 +1,11 @@
 import json
 import asyncio
 from collections import defaultdict
-from typing import List
-from neo4j import AsyncGraphDatabase
-from dataclasses import dataclass
-from typing import Union
+from typing import List, TYPE_CHECKING, Optional, Any, Union
+from dataclasses import dataclass, field
+
+if TYPE_CHECKING:
+    from neo4j import AsyncGraphDatabase
 from ..base import BaseGraphStorage, SingleCommunitySchema
 from .._utils import logger
 from ..prompt import GRAPH_FIELD_SEP
@@ -18,6 +19,25 @@ def make_path_idable(path):
 
 @dataclass
 class Neo4jStorage(BaseGraphStorage):
+    _neo4j_module: Optional[Any] = field(init=False, default=None)
+    
+    @property
+    def neo4j(self):
+        """Lazy load neo4j module."""
+        if self._neo4j_module is None:
+            try:
+                import neo4j
+                self._neo4j_module = neo4j
+            except ImportError:
+                from nano_graphrag._utils import ensure_dependency
+                ensure_dependency(
+                    "neo4j",
+                    "neo4j",
+                    "Neo4j graph storage"
+                )
+                raise  # Will never reach here
+        return self._neo4j_module
+    
     def __post_init__(self):
         self.neo4j_url = self.global_config["addon_params"].get("neo4j_url", None)
         self.neo4j_auth = self.global_config["addon_params"].get("neo4j_auth", None)
@@ -27,7 +47,7 @@ class Neo4jStorage(BaseGraphStorage):
         logger.info(f"Using the label {self.namespace} for Neo4j as identifier")
         if self.neo4j_url is None or self.neo4j_auth is None:
             raise ValueError("Missing neo4j_url or neo4j_auth in addon_params")
-        self.async_driver = AsyncGraphDatabase.driver(
+        self.async_driver = self.neo4j.AsyncGraphDatabase.driver(
             self.neo4j_url, auth=self.neo4j_auth, max_connection_pool_size=50,      
         )
 
