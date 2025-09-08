@@ -2,7 +2,6 @@
 
 from typing import Type, Dict, Optional, Set, Any, Callable
 from nano_graphrag.base import BaseVectorStorage, BaseGraphStorage, BaseKVStorage
-from nano_graphrag._utils import ensure_dependency
 
 
 class StorageFactory:
@@ -187,7 +186,6 @@ class StorageFactory:
 
 def _get_hnswlib_storage():
     """Lazy loader for HNSW storage."""
-    ensure_dependency("hnswlib", "hnswlib", "HNSW vector storage")
     from .vdb_hnswlib import HNSWVectorStorage
     return HNSWVectorStorage
 
@@ -206,7 +204,6 @@ def _get_networkx_storage():
 
 def _get_neo4j_storage():
     """Lazy loader for Neo4j storage."""
-    ensure_dependency("neo4j", "neo4j", "Neo4j graph storage")
     from .gdb_neo4j import Neo4jStorage
     return Neo4jStorage
 

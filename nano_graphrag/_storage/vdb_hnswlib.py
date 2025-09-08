@@ -29,17 +29,14 @@ class HNSWVectorStorage(BaseVectorStorage):
     def hnswlib(self):
         """Lazy load hnswlib module."""
         if self._hnswlib_module is None:
-            try:
-                import hnswlib
-                self._hnswlib_module = hnswlib
-            except ImportError:
-                from .._utils import ensure_dependency
-                ensure_dependency(
-                    "hnswlib",
-                    "hnswlib",
-                    "HNSW vector storage"
-                )
-                raise  # Will never reach here
+            from .._utils import ensure_dependency
+            ensure_dependency(
+                "hnswlib",
+                "hnswlib",
+                "HNSW vector storage"
+            )
+            import hnswlib
+            self._hnswlib_module = hnswlib
         return self._hnswlib_module
 
     def __post_init__(self):

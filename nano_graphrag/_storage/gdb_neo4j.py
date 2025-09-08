@@ -25,17 +25,14 @@ class Neo4jStorage(BaseGraphStorage):
     def neo4j(self):
         """Lazy load neo4j module."""
         if self._neo4j_module is None:
-            try:
-                import neo4j
-                self._neo4j_module = neo4j
-            except ImportError:
-                from nano_graphrag._utils import ensure_dependency
-                ensure_dependency(
-                    "neo4j",
-                    "neo4j",
-                    "Neo4j graph storage"
-                )
-                raise  # Will never reach here
+            from nano_graphrag._utils import ensure_dependency
+            ensure_dependency(
+                "neo4j",
+                "neo4j",
+                "Neo4j graph storage"
+            )
+            import neo4j
+            self._neo4j_module = neo4j
         return self._neo4j_module
     
     def __post_init__(self):
