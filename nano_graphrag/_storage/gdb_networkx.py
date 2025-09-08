@@ -36,7 +36,16 @@ class NetworkXStorage(BaseGraphStorage):
         """Refer to https://github.com/microsoft/graphrag/index/graph/utils/stable_lcc.py
         Return the largest connected component of the graph, with nodes and edges sorted in a stable way.
         """
-        from graspologic.utils import largest_connected_component
+        try:
+            from graspologic.utils import largest_connected_component
+        except ImportError:
+            from nano_graphrag._utils import ensure_dependency
+            ensure_dependency(
+                "graspologic",
+                "graspologic",
+                "largest connected component analysis"
+            )
+            raise  # Will never reach here due to ensure_dependency raising
 
         graph = graph.copy()
         graph = cast(nx.Graph, largest_connected_component(graph))
@@ -243,7 +252,16 @@ class NetworkXStorage(BaseGraphStorage):
                 self._graph.nodes[original_node_id]["clusters"] = json.dumps(clusters)
 
     async def _leiden_clustering(self):
-        from graspologic.partition import hierarchical_leiden
+        try:
+            from graspologic.partition import hierarchical_leiden
+        except ImportError:
+            from nano_graphrag._utils import ensure_dependency
+            ensure_dependency(
+                "graspologic",
+                "graspologic",
+                "Leiden community detection algorithm"
+            )
+            raise  # Will never reach here due to ensure_dependency raising
 
         logger.debug(f"Leiden clustering - Graph has {len(self._graph.nodes())} nodes and {len(self._graph.edges())} edges")
         
@@ -285,7 +303,16 @@ class NetworkXStorage(BaseGraphStorage):
         return await self._node_embed_algorithms[algorithm]()
 
     async def _node2vec_embed(self):
-        from graspologic import embed
+        try:
+            from graspologic import embed
+        except ImportError:
+            from nano_graphrag._utils import ensure_dependency
+            ensure_dependency(
+                "graspologic",
+                "graspologic",
+                "node2vec embeddings"
+            )
+            raise  # Will never reach here due to ensure_dependency raising
 
         embeddings, nodes = embed.node2vec_embed(
             self._graph,

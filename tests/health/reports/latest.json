@@ -1,5 +1,33 @@
 [
   {
+    "timestamp": "2025-09-08T19:10:18.930344+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "status": "passed",
+    "timings": {
+      "insert": 104.7065212726593,
+      "global_query": 24.9806649684906,
+      "local_query": 11.136600017547607,
+      "naive_query": 0.5311641693115234,
+      "reload": 7.8445351123809814,
+      "total": 149.5479052066803
+    },
+    "counts": {
+      "nodes": 79,
+      "edges": 89,
+      "communities": 14,
+      "chunks": 14
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
     "timestamp": "2025-09-06T20:50:59.190639+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",
