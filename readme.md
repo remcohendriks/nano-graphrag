@@ -64,6 +64,13 @@ pip install -e .
 pip install nano-graphrag
 ```
 
+**Install with optional dependencies**
+
+```shell
+# Install with Qdrant vector database support
+pip install nano-graphrag[qdrant]
+```
+
 
 
 ## Quick Start
@@ -180,6 +187,7 @@ Below are the components you can use:
 |                 |                    Sentence-transformers                     |              [examples](./examples)               |
 | Vector DataBase | [`nano-vectordb`](https://github.com/gusye1234/nano-vectordb) |                     Built-in                      |
 |                 |        [`hnswlib`](https://github.com/nmslib/hnswlib)        |         Built-in, [examples](./examples)          |
+|                 |           [`qdrant`](https://qdrant.tech/)                   |         Built-in, [examples](./examples)          |
 |                 |  [`milvus-lite`](https://github.com/milvus-io/milvus-lite)   |              [examples](./examples)               |
 |                 | [faiss](https://github.com/facebookresearch/faiss?tab=readme-ov-file) |              [examples](./examples)               |
 | Graph Storage   | [`networkx`](https://networkx.org/documentation/stable/index.html) |                     Built-in                      |

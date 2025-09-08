@@ -12,7 +12,7 @@ class StorageFactory:
     _kv_backends: Dict[str, Callable[[], Type[BaseKVStorage]]] = {}
     
     # Maintain current restrictions from StorageConfig
-    ALLOWED_VECTOR = {"nano", "hnswlib"}
+    ALLOWED_VECTOR = {"nano", "hnswlib", "qdrant"}
     ALLOWED_GRAPH = {"networkx"}
     ALLOWED_KV = {"json"}
     
@@ -214,12 +214,19 @@ def _get_json_storage():
     return JsonKVStorage
 
 
+def _get_qdrant_storage():
+    """Lazy loader for Qdrant storage."""
+    from .vdb_qdrant import QdrantVectorStorage
+    return QdrantVectorStorage
+
+
 def _register_backends():
     """Register built-in backends with lazy loaders. Called when factory is first used."""
     # Register vector backends if not already registered
     if not StorageFactory._vector_backends:
         StorageFactory.register_vector("hnswlib", _get_hnswlib_storage)
         StorageFactory.register_vector("nano", _get_nano_storage)
+        StorageFactory.register_vector("qdrant", _get_qdrant_storage)
     
     # Register graph backends if not already registered
     if not StorageFactory._graph_backends:
