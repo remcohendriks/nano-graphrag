@@ -2,6 +2,7 @@
 
 import pytest
 import asyncio
+import xxhash
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 import numpy as np
 
@@ -125,8 +126,9 @@ class TestQdrantStorage:
                     mock_point_struct.assert_called_once()
                     point_args = mock_point_struct.call_args
                     
-                    # Check ID is a hash-based integer
-                    assert isinstance(point_args.kwargs["id"], int)
+                    # Check ID is deterministic using xxhash
+                    expected_id = xxhash.xxh64_intdigest("test_content_1".encode())
+                    assert point_args.kwargs["id"] == expected_id
                     
                     # Check payload contains content
                     assert point_args.kwargs["payload"]["content"] == "This is test content"

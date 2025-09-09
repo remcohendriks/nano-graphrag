@@ -296,6 +296,11 @@ class GraphRAGConfig:
                 'M': self.storage.hnsw_m,
                 'max_elements': self.storage.hnsw_max_elements,
             }
+        elif self.storage.vector_backend == "qdrant":
+            # Add Qdrant-specific configuration
+            config_dict['qdrant_url'] = self.storage.qdrant_url
+            config_dict['qdrant_api_key'] = self.storage.qdrant_api_key
+            config_dict['qdrant_collection_params'] = self.storage.qdrant_collection_params
         
         # Add node2vec configuration if enabled and using NetworkX
         if self.storage.graph_backend == "networkx" and self.storage.node2vec.enabled:

@@ -15,7 +15,7 @@ Environment variables (optional):
 
 import asyncio
 import os
-from nano_graphrag import GraphRAG
+from nano_graphrag import GraphRAG, QueryParam
 from nano_graphrag.config import GraphRAGConfig, StorageConfig
 
 # Optional: Set environment variables
@@ -33,12 +33,12 @@ async def main():
         storage=StorageConfig(
             vector_backend="qdrant",  # Use Qdrant for vector storage
             qdrant_url="http://localhost:6333",  # Qdrant server URL
+            working_dir="./qdrant_graphrag_cache",  # Local cache directory
             # qdrant_api_key="your-api-key",  # Optional: for Qdrant Cloud
             # qdrant_collection_params={  # Optional: collection configuration
             #     "on_disk": True,  # Store vectors on disk for large datasets
             # }
-        ),
-        working_dir="./qdrant_graphrag_cache"  # Local cache directory
+        )
     )
     
     # Initialize GraphRAG
@@ -83,7 +83,7 @@ async def main():
         print(f"❓ Question: {query}")
         
         # Query using local mode (searches within specific communities)
-        answer = await rag.aquery(query, mode="local")
+        answer = await rag.aquery(query, param=QueryParam(mode="local"))
         print(f"💡 Answer: {answer}\n")
         print("-" * 50 + "\n")
     

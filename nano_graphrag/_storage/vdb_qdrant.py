@@ -1,6 +1,7 @@
 """Qdrant vector storage implementation."""
 
 import asyncio
+import xxhash
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 
@@ -73,8 +74,8 @@ class QdrantVectorStorage(BaseVectorStorage):
         # Prepare points
         points = []
         for content_key, content_data in data.items():
-            # Use simple hash for ID (positive integer)
-            point_id = abs(hash(content_key)) % (10 ** 15)  # Keep it within reasonable range
+            # Use xxhash for deterministic ID generation
+            point_id = xxhash.xxh64_intdigest(content_key.encode())
             
             # Get embedding
             if "embedding" in content_data:
@@ -83,6 +84,10 @@ class QdrantVectorStorage(BaseVectorStorage):
             else:
                 # Generate embedding from content
                 embedding = (await self.embedding_func([content_data["content"]]))[0]
+            
+            # Convert numpy array to list if needed
+            if hasattr(embedding, 'tolist'):
+                embedding = embedding.tolist()
             
             # Prepare payload (all fields except embedding)
             payload = {
@@ -103,14 +108,18 @@ class QdrantVectorStorage(BaseVectorStorage):
                 )
             )
         
-        # Upsert to Qdrant
-        await self._client.upsert(
-            collection_name=self.namespace,
-            points=points,
-            wait=True  # Ensure consistency
-        )
+        # Upsert to Qdrant in batches
+        batch_size = 100  # Configurable batch size for better performance
+        for i in range(0, len(points), batch_size):
+            batch = points[i:i + batch_size]
+            await self._client.upsert(
+                collection_name=self.namespace,
+                points=batch,
+                wait=True  # Ensure consistency
+            )
+            logger.debug(f"Upserted batch {i//batch_size + 1} with {len(batch)} points")
         
-        logger.info(f"Successfully upserted {len(points)} points to Qdrant")
+        logger.info(f"Successfully upserted {len(points)} points to Qdrant in {(len(points) + batch_size - 1) // batch_size} batches")
     
     async def query(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """Query Qdrant collection for similar vectors."""
@@ -118,6 +127,10 @@ class QdrantVectorStorage(BaseVectorStorage):
         
         # Get query embedding
         query_embedding = (await self.embedding_func([query]))[0]
+        
+        # Convert numpy array to list if needed
+        if hasattr(query_embedding, 'tolist'):
+            query_embedding = query_embedding.tolist()
         
         # Search in Qdrant
         results = await self._client.search(
