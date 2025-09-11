@@ -69,6 +69,9 @@ pip install nano-graphrag
 ```shell
 # Install with Qdrant vector database support
 pip install nano-graphrag[qdrant]
+
+# Install with HNSW vector database support  
+pip install nano-graphrag[hnsw]
 ```
 
 
@@ -185,9 +188,9 @@ Below are the components you can use:
 | Embedding       |                            OpenAI                            |                     Built-in                      |
 |                 |                        Amazon Bedrock                        |                     Built-in                      |
 |                 |                    Sentence-transformers                     |              [examples](./examples)               |
-| Vector DataBase | [`nano-vectordb`](https://github.com/gusye1234/nano-vectordb) |                     Built-in                      |
-|                 |        [`hnswlib`](https://github.com/nmslib/hnswlib)        |         Built-in, [examples](./examples)          |
-|                 |           [`qdrant`](https://qdrant.tech/)                   |         Built-in, [examples](./examples)          |
+| Vector DataBase | [`nano-vectordb`](https://github.com/gusye1234/nano-vectordb) |                     Built-in (default)             |
+|                 |        [`hnswlib`](https://github.com/nmslib/hnswlib)        |                     Built-in                      |
+|                 |           [`qdrant`](https://qdrant.tech/)                   |                     Built-in                      |
 |                 |  [`milvus-lite`](https://github.com/milvus-io/milvus-lite)   |              [examples](./examples)               |
 |                 | [faiss](https://github.com/facebookresearch/faiss?tab=readme-ov-file) |              [examples](./examples)               |
 | Graph Storage   | [`networkx`](https://networkx.org/documentation/stable/index.html) |                     Built-in                      |
@@ -366,7 +369,8 @@ You can replace all storage-related components to your own implementation, `nano
 **`base.BaseVectorStorage` for indexing embeddings**
 
 - By default we use [`nano-vectordb`](https://github.com/gusye1234/nano-vectordb) as the backend.
-- We have a built-in [`hnswlib`](https://github.com/nmslib/hnswlib) storage also, check out this [example](./examples/using_hnsw_as_vectorDB.py).
+- We have built-in [`hnswlib`](https://github.com/nmslib/hnswlib) storage, check out this [example](./examples/using_hnsw_as_vectorDB.py).
+- We have built-in [`qdrant`](https://qdrant.tech/) storage for production use, check out this [example](./examples/storage_qdrant_config.py).
 - Check out this [example](./examples/using_milvus_as_vectorDB.py) that implements [`milvus-lite`](https://github.com/milvus-io/milvus-lite) as the backend (not available in Windows).
 - `GraphRAG(.., vector_db_storage_cls=YOURS,...)`
 
