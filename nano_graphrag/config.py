@@ -101,6 +101,12 @@ class StorageConfig:
     qdrant_api_key: Optional[str] = None
     qdrant_collection_params: dict = field(default_factory=dict)
     
+    # Neo4j specific settings
+    neo4j_url: str = "neo4j://localhost:7687"
+    neo4j_username: str = "neo4j"
+    neo4j_password: str = "password"
+    neo4j_database: str = "neo4j"
+    
     # Node2Vec configuration (for NetworkX backend)
     node2vec: Node2VecConfig = field(default_factory=lambda: Node2VecConfig(enabled=True))
     
@@ -117,14 +123,18 @@ class StorageConfig:
             hnsw_m=int(os.getenv("HNSW_M", "16")),
             hnsw_max_elements=int(os.getenv("HNSW_MAX_ELEMENTS", "1000000")),
             qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"),
-            qdrant_api_key=os.getenv("QDRANT_API_KEY", None)
+            qdrant_api_key=os.getenv("QDRANT_API_KEY", None),
+            neo4j_url=os.getenv("NEO4J_URL", "neo4j://localhost:7687"),
+            neo4j_username=os.getenv("NEO4J_USERNAME", "neo4j"),
+            neo4j_password=os.getenv("NEO4J_PASSWORD", "password"),
+            neo4j_database=os.getenv("NEO4J_DATABASE", "neo4j")
         )
     
     def __post_init__(self):
         """Validate configuration."""
         # Only allow implemented backends
         valid_vector_backends = {"nano", "hnswlib", "qdrant"}
-        valid_graph_backends = {"networkx"}
+        valid_graph_backends = {"networkx", "neo4j"}
         valid_kv_backends = {"json"}
         
         if self.vector_backend not in valid_vector_backends:
@@ -301,6 +311,14 @@ class GraphRAGConfig:
             config_dict['qdrant_url'] = self.storage.qdrant_url
             config_dict['qdrant_api_key'] = self.storage.qdrant_api_key
             config_dict['qdrant_collection_params'] = self.storage.qdrant_collection_params
+        
+        # Add Neo4j configuration if using Neo4j backend
+        if self.storage.graph_backend == "neo4j":
+            config_dict['addon_params'] = {
+                'neo4j_url': self.storage.neo4j_url,
+                'neo4j_auth': (self.storage.neo4j_username, self.storage.neo4j_password),
+                'neo4j_database': self.storage.neo4j_database,
+            }
         
         # Add node2vec configuration if enabled and using NetworkX
         if self.storage.graph_backend == "networkx" and self.storage.node2vec.enabled:

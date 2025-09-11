@@ -3,6 +3,7 @@ import asyncio
 from collections import defaultdict
 from typing import List, TYPE_CHECKING, Optional, Any, Union
 from dataclasses import dataclass, field
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 if TYPE_CHECKING:
     from neo4j import AsyncGraphDatabase
@@ -38,47 +39,74 @@ class Neo4jStorage(BaseGraphStorage):
     def __post_init__(self):
         self.neo4j_url = self.global_config["addon_params"].get("neo4j_url", None)
         self.neo4j_auth = self.global_config["addon_params"].get("neo4j_auth", None)
+        self.neo4j_database = self.global_config["addon_params"].get("neo4j_database", "neo4j")
         self.namespace = (
             f"{make_path_idable(self.global_config['working_dir'])}__{self.namespace}"
         )
         logger.info(f"Using the label {self.namespace} for Neo4j as identifier")
         if self.neo4j_url is None or self.neo4j_auth is None:
             raise ValueError("Missing neo4j_url or neo4j_auth in addon_params")
+        
+        # Setup retry exceptions - will be imported when needed
+        self._retry_exceptions = None
+        
         self.async_driver = self.neo4j.AsyncGraphDatabase.driver(
-            self.neo4j_url, auth=self.neo4j_auth, max_connection_pool_size=50,      
+            self.neo4j_url, 
+            auth=self.neo4j_auth, 
+            max_connection_pool_size=50,
+            database=self.neo4j_database
         )
 
-    # async def create_database(self):
-    #     async with self.async_driver.session() as session:
-    #         try:
-    #             constraints = await session.run("SHOW CONSTRAINTS")
-    #             # TODO I don't know why CREATE CONSTRAINT IF NOT EXISTS still trigger error
-    #             # so have to check if the constrain exists
-    #             constrain_exists = False
-
-    #             async for record in constraints:
-    #                 if (
-    #                     self.namespace in record["labelsOrTypes"]
-    #                     and "id" in record["properties"]
-    #                     and record["type"] == "UNIQUENESS"
-    #                 ):
-    #                     constrain_exists = True
-    #                     break
-    #             if not constrain_exists:
-    #                 await session.run(
-    #                     f"CREATE CONSTRAINT FOR (n:{self.namespace}) REQUIRE n.id IS UNIQUE"
-    #                 )
-    #                 logger.info(f"Add constraint for namespace: {self.namespace}")
-
-    #         except Exception as e:
-    #             logger.error(f"Error accessing or setting up the database: {str(e)}")
-    #             raise
+    def _get_retry_decorator(self):
+        """Get retry decorator with Neo4j exceptions."""
+        try:
+            from neo4j.exceptions import ServiceUnavailable, SessionExpired
+            return retry(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=1, min=1, max=10),
+                retry=retry_if_exception_type((ServiceUnavailable, SessionExpired))
+            )
+        except ImportError:
+            # If exceptions not available, just retry on any exception
+            return retry(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=1, min=1, max=10)
+            )
+    
+    async def _ensure_constraints(self):
+        """Create constraints with proper async handling."""
+        async with self.async_driver.session(database=self.neo4j_database) as session:
+            async def create_constraints(tx):
+                # Check existing constraints
+                result = await tx.run("SHOW CONSTRAINTS")
+                existing = set()
+                async for record in result:
+                    labels = record.get("labelsOrTypes", [])
+                    props = record.get("properties", [])
+                    if self.namespace in labels:
+                        existing.add(tuple(props))
+                
+                # Only create if not exists
+                if ("id",) not in existing:
+                    await tx.run(
+                        f"CREATE CONSTRAINT IF NOT EXISTS "
+                        f"FOR (n:`{self.namespace}`) "
+                        f"REQUIRE n.id IS UNIQUE"
+                    )
+                    logger.info(f"Created uniqueness constraint for {self.namespace}.id")
+                else:
+                    logger.debug(f"Constraint for {self.namespace}.id already exists")
+            
+            try:
+                await session.execute_write(create_constraints)
+            except Exception as e:
+                logger.warning(f"Constraint creation failed (may already exist): {e}")
 
     async def _init_workspace(self):
         await self.async_driver.verify_authentication()
         await self.async_driver.verify_connectivity()
-        # TODOLater: create database if not exists always cause an error when async
-        # await self.create_database()
+        # Create constraints with proper async handling
+        await self._ensure_constraints()
 
     async def index_start_callback(self):
         logger.info("Init Neo4j workspace")
@@ -334,7 +362,10 @@ class Neo4jStorage(BaseGraphStorage):
             return [[] for _ in node_ids]
 
     async def upsert_node(self, node_id: str, node_data: dict[str, str]):
-        await self.upsert_nodes_batch([(node_id, node_data)])
+        # Apply retry decorator dynamically
+        retry_decorator = self._get_retry_decorator()
+        retried_func = retry_decorator(self.upsert_nodes_batch)
+        await retried_func([(node_id, node_data)])
 
     async def upsert_nodes_batch(self, nodes_data: list[tuple[str, dict[str, str]]]):
         if not nodes_data:
@@ -347,7 +378,7 @@ class Neo4jStorage(BaseGraphStorage):
                 nodes_by_type[node_type] = []
             nodes_by_type[node_type].append((node_id, node_data))
         
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             for node_type, type_nodes in nodes_by_type.items():
                 params = [{"id": node_id, "data": node_data} for node_id, node_data in type_nodes]
                 
@@ -363,7 +394,10 @@ class Neo4jStorage(BaseGraphStorage):
     async def upsert_edge(
         self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]
     ):
-        await self.upsert_edges_batch([(source_node_id, target_node_id, edge_data)])
+        # Apply retry decorator dynamically
+        retry_decorator = self._get_retry_decorator()
+        retried_func = retry_decorator(self.upsert_edges_batch)
+        await retried_func([(source_node_id, target_node_id, edge_data)])
 
 
     async def upsert_edges_batch(
@@ -383,7 +417,7 @@ class Neo4jStorage(BaseGraphStorage):
                 "edge_data": edge_data_copy
             })
         
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             await session.run(
                 f"""
                 UNWIND $edges AS edge
