@@ -24,32 +24,45 @@ class QdrantVectorStorage(BaseVectorStorage):
         self._api_key = self.global_config.get("qdrant_api_key", None)
         self._collection_params = self.global_config.get("qdrant_collection_params", {})
         
-        # Initialize async client
-        self._client = AsyncQdrantClient(
-            url=self._url,
-            api_key=self._api_key
-        )
-        
-        # Store models for later use
+        # Store models for later use (needed before client creation)
         self._models = models
+        
+        # Defer client creation to avoid potential sync issues
+        self._client = None
+        self._AsyncQdrantClient = AsyncQdrantClient
         
         # Collection will be created on first use
         self._collection_initialized = False
         
         logger.info(f"Initialized Qdrant storage for namespace: {self.namespace}")
     
+    async def _get_client(self):
+        """Get or create the Qdrant client."""
+        if self._client is None:
+            self._client = self._AsyncQdrantClient(
+                url=self._url,
+                api_key=self._api_key
+            )
+        return self._client
+    
     async def _ensure_collection(self):
         """Ensure collection exists with proper configuration."""
         if self._collection_initialized:
             return
         
+        logger.debug(f"Checking if Qdrant collection '{self.namespace}' exists...")
+        
+        # Get client
+        client = await self._get_client()
+        
         # Check if collection exists
-        collections = await self._client.get_collections()
+        collections = await client.get_collections()
         exists = any(c.name == self.namespace for c in collections.collections)
         
         if not exists:
+            logger.info(f"Creating Qdrant collection: {self.namespace}")
             # Create collection with cosine distance
-            await self._client.create_collection(
+            await client.create_collection(
                 collection_name=self.namespace,
                 vectors_config=self._models.VectorParams(
                     size=self.embedding_func.embedding_dim,
@@ -58,6 +71,8 @@ class QdrantVectorStorage(BaseVectorStorage):
                 **self._collection_params
             )
             logger.info(f"Created Qdrant collection: {self.namespace}")
+        else:
+            logger.debug(f"Qdrant collection '{self.namespace}' already exists")
         
         self._collection_initialized = True
     
@@ -68,22 +83,43 @@ class QdrantVectorStorage(BaseVectorStorage):
             return
         
         await self._ensure_collection()
-        
-        logger.info(f"Upserting {len(data)} vectors to Qdrant collection: {self.namespace}")
+        logger.info(f"Upserting {len(data)} items to Qdrant collection '{self.namespace}'")
         
         # Prepare points
         points = []
+        contents_to_embed = []
+        keys_to_embed = []
+        
+        # First pass: collect items that need embeddings
+        for content_key, content_data in data.items():
+            if "embedding" not in content_data:
+                # Need to generate embedding from content
+                content = content_data.get("content", "")
+                contents_to_embed.append(content)
+                keys_to_embed.append(content_key)
+        
+        if contents_to_embed:
+            logger.debug(f"Generating {len(contents_to_embed)} embeddings")
+        
+        # Generate embeddings in batch if needed
+        if contents_to_embed:
+            embeddings = await self.embedding_func(contents_to_embed)
+        else:
+            embeddings = []
+        
+        # Second pass: create points
+        embedding_idx = 0
+        
         for content_key, content_data in data.items():
             # Use xxhash for deterministic ID generation
             point_id = xxhash.xxh64_intdigest(content_key.encode())
             
-            # Get embedding
+            # Get or use provided embedding
             if "embedding" in content_data:
-                # Use provided embedding
                 embedding = content_data["embedding"]
             else:
-                # Generate embedding from content
-                embedding = (await self.embedding_func([content_data["content"]]))[0]
+                embedding = embeddings[embedding_idx]
+                embedding_idx += 1
             
             # Convert numpy array to list if needed
             if hasattr(embedding, 'tolist'):
@@ -91,6 +127,7 @@ class QdrantVectorStorage(BaseVectorStorage):
             
             # Prepare payload (all fields except embedding)
             payload = {
+                "id": content_key,  # Store original key for retrieval
                 "content": content_data.get("content", content_key),
                 **{k: v for k, v in content_data.items() if k not in ["embedding", "content"]}
             }
@@ -110,16 +147,23 @@ class QdrantVectorStorage(BaseVectorStorage):
         
         # Upsert to Qdrant in batches
         batch_size = 100  # Configurable batch size for better performance
+        total_batches = (len(points) + batch_size - 1) // batch_size
+        
         for i in range(0, len(points), batch_size):
             batch = points[i:i + batch_size]
-            await self._client.upsert(
+            batch_num = i // batch_size + 1
+            
+            client = await self._get_client()
+            await client.upsert(
                 collection_name=self.namespace,
                 points=batch,
                 wait=True  # Ensure consistency
             )
-            logger.debug(f"Upserted batch {i//batch_size + 1} with {len(batch)} points")
+            
+            if batch_num % 10 == 0 or batch_num == total_batches:
+                logger.debug(f"Upserted batch {batch_num}/{total_batches}")
         
-        logger.info(f"Successfully upserted {len(points)} points to Qdrant in {(len(points) + batch_size - 1) // batch_size} batches")
+        logger.info(f"Successfully upserted {len(points)} points to Qdrant")
     
     async def query(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """Query Qdrant collection for similar vectors."""
@@ -133,7 +177,8 @@ class QdrantVectorStorage(BaseVectorStorage):
             query_embedding = query_embedding.tolist()
         
         # Search in Qdrant
-        results = await self._client.search(
+        client = await self._get_client()
+        results = await client.search(
             collection_name=self.namespace,
             query_vector=query_embedding,
             limit=top_k,
@@ -144,6 +189,7 @@ class QdrantVectorStorage(BaseVectorStorage):
         formatted_results = []
         for hit in results:
             result = {
+                "id": hit.payload.get("id", str(hit.id)),  # Use stored ID from payload, fallback to numeric
                 "content": hit.payload.get("content", ""),
                 "score": hit.score,  # Qdrant returns similarity score (0-1)
                 **hit.payload  # Include all payload fields
@@ -165,4 +211,5 @@ class QdrantVectorStorage(BaseVectorStorage):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit - close client."""
         if hasattr(self, '_client'):
-            await self._client.close()
+            if self._client:
+                await self._client.close()

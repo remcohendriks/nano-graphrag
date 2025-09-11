@@ -107,6 +107,7 @@ class StorageFactory:
             init_kwargs.update(global_config["vector_db_storage_cls_kwargs"])
         
         init_kwargs.update(kwargs)
+        
         # Get the backend class through the loader
         backend_class = cls._vector_backends[backend]()
         return backend_class(**init_kwargs)

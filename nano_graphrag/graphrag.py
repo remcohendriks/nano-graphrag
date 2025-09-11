@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -224,18 +225,26 @@ class GraphRAG:
     
     async def ainsert(self, string_or_strings: Union[str, List[str]]):
         """Insert documents asynchronously."""
+        logger.info(f"[INSERT] === Starting ainsert ===")
+        
         if isinstance(string_or_strings, str):
             string_or_strings = [string_or_strings]
+            logger.info(f"[INSERT] Processing single document")
+        else:
+            logger.info(f"[INSERT] Processing {len(string_or_strings)} documents")
         
         # Process each document
-        for doc_string in string_or_strings:
+        for doc_idx, doc_string in enumerate(string_or_strings):
             doc_id = compute_mdhash_id(doc_string, prefix="doc-")
-            logger.info(f"Inserting document {doc_id}")
+            logger.info(f"[INSERT] Document {doc_idx+1}: {doc_id} ({len(doc_string)} chars)")
             
             # Store full document
+            logger.info(f"[INSERT] Storing full document...")
             await self.full_docs.upsert({doc_id: {"content": doc_string}})
+            logger.info(f"[INSERT] Full document stored")
             
             # Chunk the document
+            logger.info(f"[INSERT] Chunking document (size={self.config.chunking.size}, overlap={self.config.chunking.overlap})...")
             chunks = await get_chunks_v2(
                 doc_string,
                 self.tokenizer_wrapper,
@@ -243,17 +252,23 @@ class GraphRAG:
                 self.config.chunking.size,
                 self.config.chunking.overlap
             )
+            logger.info(f"[INSERT] Created {len(chunks)} chunks")
             
             # Store chunks
-            for chunk in chunks:
+            logger.info(f"[INSERT] Storing chunks...")
+            for chunk_idx, chunk in enumerate(chunks):
                 # Include doc_id in hash to prevent cross-document chunk collisions
                 chunk_id_content = f"{doc_id}::{chunk['content']}"
                 chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
                 chunk["doc_id"] = doc_id
                 await self.text_chunks.upsert({chunk_id: chunk})
+                if (chunk_idx + 1) % 10 == 0:
+                    logger.info(f"[INSERT] Stored {chunk_idx + 1}/{len(chunks)} chunks")
+            logger.info(f"[INSERT] All chunks stored")
                 
             # Extract entities if local query is enabled
             if self.config.query.enable_local:
+                logger.info(f"[INSERT] Starting entity extraction...")
                 chunk_map = {}
                 for i, chunk in enumerate(chunks):
                     # Include doc_id in hash to prevent cross-document chunk collisions
@@ -261,6 +276,7 @@ class GraphRAG:
                     chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
                     chunk_map[chunk_id] = chunk
                 
+                logger.info(f"[INSERT] Calling extract_entities with {len(chunk_map)} chunks...")
                 await extract_entities(
                     chunk_map,
                     self.chunk_entity_relation_graph,
@@ -269,9 +285,11 @@ class GraphRAG:
                     self._global_config(),
                     using_amazon_bedrock=False
                 )
+                logger.info(f"[INSERT] Entity extraction complete")
             
             # Store chunks in vector DB if naive RAG is enabled
             if self.config.query.enable_naive_rag and self.chunks_vdb:
+                logger.info(f"[INSERT] Storing chunks in vector DB...")
                 chunk_dict = {}
                 for chunk in chunks:
                     # Include doc_id in hash to prevent cross-document chunk collisions
@@ -281,14 +299,20 @@ class GraphRAG:
                         "content": chunk["content"],
                         "doc_id": doc_id,
                     }
+                logger.info(f"[INSERT] Calling chunks_vdb.upsert with {len(chunk_dict)} chunks...")
                 await self.chunks_vdb.upsert(chunk_dict)
+                logger.info(f"[INSERT] Chunks stored in vector DB")
         
         # Generate community reports if local query is enabled
         if self.config.query.enable_local:
+            logger.info(f"[INSERT] Generating community reports...")
             await self._generate_community_reports()
+            logger.info(f"[INSERT] Community reports generated")
         
         # Flush all storage to ensure persistence
+        logger.info(f"[INSERT] Flushing storage...")
         await self._flush_storage()
+        logger.info(f"[INSERT] === Insert complete ===")
     
     async def _generate_community_reports(self):
         """Generate community reports for graph clusters."""
