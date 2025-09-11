@@ -96,6 +96,11 @@ class StorageConfig:
     hnsw_m: int = 16
     hnsw_max_elements: int = 1_000_000
     
+    # Qdrant specific settings
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: Optional[str] = None
+    qdrant_collection_params: dict = field(default_factory=dict)
+    
     # Node2Vec configuration (for NetworkX backend)
     node2vec: Node2VecConfig = field(default_factory=lambda: Node2VecConfig(enabled=True))
     
@@ -110,13 +115,15 @@ class StorageConfig:
             hnsw_ef_construction=int(os.getenv("HNSW_EF_CONSTRUCTION", "100")),
             hnsw_ef_search=int(os.getenv("HNSW_EF_SEARCH", "50")),
             hnsw_m=int(os.getenv("HNSW_M", "16")),
-            hnsw_max_elements=int(os.getenv("HNSW_MAX_ELEMENTS", "1000000"))
+            hnsw_max_elements=int(os.getenv("HNSW_MAX_ELEMENTS", "1000000")),
+            qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"),
+            qdrant_api_key=os.getenv("QDRANT_API_KEY", None)
         )
     
     def __post_init__(self):
         """Validate configuration."""
         # Only allow implemented backends
-        valid_vector_backends = {"nano", "hnswlib"}
+        valid_vector_backends = {"nano", "hnswlib", "qdrant"}
         valid_graph_backends = {"networkx"}
         valid_kv_backends = {"json"}
         
@@ -289,6 +296,11 @@ class GraphRAGConfig:
                 'M': self.storage.hnsw_m,
                 'max_elements': self.storage.hnsw_max_elements,
             }
+        elif self.storage.vector_backend == "qdrant":
+            # Add Qdrant-specific configuration
+            config_dict['qdrant_url'] = self.storage.qdrant_url
+            config_dict['qdrant_api_key'] = self.storage.qdrant_api_key
+            config_dict['qdrant_collection_params'] = self.storage.qdrant_collection_params
         
         # Add node2vec configuration if enabled and using NetworkX
         if self.storage.graph_backend == "networkx" and self.storage.node2vec.enabled:

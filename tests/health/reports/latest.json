@@ -1,5 +1,39 @@
 [
   {
+    "timestamp": "2025-09-11T17:35:34.097663+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "networkx",
+      "kv_backend": "json",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "passed",
+    "timings": {
+      "insert": 208.01592111587524,
+      "global_query": 25.80295991897583,
+      "local_query": 12.901647806167603,
+      "naive_query": 9.730495929718018,
+      "reload": 7.658828258514404,
+      "total": 264.60921907424927
+    },
+    "counts": {
+      "nodes": 83,
+      "edges": 99,
+      "communities": 18,
+      "chunks": 14
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
     "timestamp": "2025-09-08T19:10:18.930344+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",
@@ -77,64 +111,6 @@
     "errors": [],
     "tests": {
       "insert": "passed",
-      "global_query": "passed",
-      "local_query": "passed",
-      "naive_query": "passed",
-      "reload": "passed"
-    }
-  },
-  {
-    "timestamp": "2025-09-04T17:02:37.993747+00:00",
-    "provider": "openai",
-    "model": "gpt-5-mini",
-    "status": "failed",
-    "timings": {
-      "global_query": 0.029967069625854492,
-      "local_query": 11.551758289337158,
-      "naive_query": 0.6425693035125732,
-      "reload": 0.020824909210205078,
-      "total": 140.57242703437805
-    },
-    "counts": {
-      "nodes": 0,
-      "edges": 0,
-      "communities": 0,
-      "chunks": 0
-    },
-    "errors": [
-      "Insert failed: Request timed out"
-    ],
-    "tests": {
-      "insert": "failed",
-      "global_query": "passed",
-      "local_query": "passed",
-      "naive_query": "passed",
-      "reload": "passed"
-    }
-  },
-  {
-    "timestamp": "2025-09-03T19:38:16.352997+00:00",
-    "provider": "openai",
-    "model": "gpt-5-mini",
-    "status": "failed",
-    "timings": {
-      "global_query": 24.42636489868164,
-      "local_query": 11.406412124633789,
-      "naive_query": 7.274020195007324,
-      "reload": 5.896968841552734,
-      "total": 223.00160670280457
-    },
-    "counts": {
-      "nodes": 0,
-      "edges": 0,
-      "communities": 0,
-      "chunks": 0
-    },
-    "errors": [
-      "Insert failed: Request timed out"
-    ],
-    "tests": {
-      "insert": "failed",
       "global_query": "passed",
       "local_query": "passed",
       "naive_query": "passed",

@@ -201,8 +201,10 @@ async def extract_entities(
     global_config: Dict[str, Any],
     using_amazon_bedrock: bool=False,
 ) -> Optional[BaseGraphStorage]:
+    logger.info(f"[EXTRACT] Starting extract_entities with {len(chunks)} chunks")
     use_llm_func: callable = global_config["best_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
+    logger.info(f"[EXTRACT] Max gleaning: {entity_extract_max_gleaning}")
 
     ordered_chunks = list(chunks.items())
 

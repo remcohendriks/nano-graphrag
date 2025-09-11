@@ -448,14 +448,20 @@ async def naive_query(
         return PROMPTS["fail_response"]
     chunks_ids = [r["id"] for r in results]
     chunks = await text_chunks_db.get_by_ids(chunks_ids)
+    
+    # Filter out None chunks that may not exist in text_chunks_db
+    valid_chunks = [c for c in chunks if c is not None]
+    if not valid_chunks:
+        logger.warning("No valid chunks found in text_chunks_db")
+        return PROMPTS["fail_response"]
 
     maybe_trun_chunks = truncate_list_by_token_size(
-        chunks,
+        valid_chunks,
         key=lambda x: x["content"],
         max_token_size=query_param.naive_max_token_for_text_unit,
         tokenizer_wrapper=tokenizer_wrapper, # Pass in wrapper
     )
-    logger.info(f"Truncate {len(chunks)} to {len(maybe_trun_chunks)} chunks")
+    logger.info(f"Truncate {len(valid_chunks)} to {len(maybe_trun_chunks)} chunks")
     section = "--New Chunk--\n".join([c["content"] for c in maybe_trun_chunks])
     if query_param.only_need_context:
         return section

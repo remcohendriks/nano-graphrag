@@ -37,4 +37,7 @@ setuptools.setup(
     ],
     python_requires=">=3.9",
     install_requires=deps,
+    extras_require={
+        "qdrant": ["qdrant-client>=1.7.0"],
+    },
 )

@@ -365,6 +365,7 @@ def check_optional_dependencies() -> Dict[str, bool]:
         "graspologic": "graspologic",
         "openai": "openai",
         "aioboto3": "aioboto3",
+        "qdrant_client": "qdrant-client",
     }
     
     available = {}

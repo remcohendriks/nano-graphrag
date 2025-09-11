@@ -60,6 +60,11 @@ class HealthCheck:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "provider": os.environ.get("LLM_PROVIDER", "openai"),
             "model": os.environ.get("LLM_MODEL", "unknown"),
+            "storage": {
+                "vector_backend": os.environ.get("STORAGE_VECTOR_BACKEND", "nano"),
+                "graph_backend": os.environ.get("STORAGE_GRAPH_BACKEND", "networkx"),
+                "kv_backend": os.environ.get("STORAGE_KV_BACKEND", "json"),
+            },
             "status": "running",
             "timings": {},
             "counts": {
@@ -149,14 +154,19 @@ class HealthCheck:
             print("Inserting document...")
             print(f"Using LLM model: {graph.config.llm.model}")
             print(f"Using embedding model: {graph.config.embedding.model}")
+            print(f"Using vector backend: {graph.config.storage.vector_backend}")
             print(f"Chunk size: {graph.config.chunking.size}")
             print(f"Max gleaning: {graph.config.entity_extraction.max_gleaning}")
+            print(f"Document size: {len(text):,} characters")
             
             start_time = time.time()
             
+            print("Starting async insert task...")
             # Add longer timeout for GPT-5 models
             insert_task = asyncio.create_task(graph.ainsert(text))
+            print("Waiting for insert to complete (600s timeout)...")
             await asyncio.wait_for(insert_task, timeout=600)  # 10 minute timeout
+            print("Insert task completed!")
             
             artifacts = [
                 "kv_store_full_docs.json",
@@ -386,7 +396,23 @@ class HealthCheck:
             
             # Initialize GraphRAG using only environment configuration
             # No function injection - GraphRAG will use env vars for LLM/embedding config
-            graph = GraphRAG(config=GraphRAGConfig.from_env())
+            config = GraphRAGConfig.from_env()
+            graph = GraphRAG(config=config)
+            
+            # Print storage configuration
+            print(f"\nStorage Configuration:")
+            print(f"  Vector Backend: {config.storage.vector_backend}")
+            print(f"  Graph Backend: {config.storage.graph_backend}")
+            print(f"  KV Backend: {config.storage.kv_backend}")
+            if config.storage.vector_backend == "qdrant":
+                print(f"  Qdrant URL: {config.storage.qdrant_url}")
+            
+            # Update results with actual config values
+            self.results["storage"]["vector_backend"] = config.storage.vector_backend
+            self.results["storage"]["graph_backend"] = config.storage.graph_backend
+            self.results["storage"]["kv_backend"] = config.storage.kv_backend
+            if config.storage.vector_backend == "qdrant":
+                self.results["storage"]["qdrant_url"] = config.storage.qdrant_url
             
             # Run tests
             tests_passed = []
@@ -473,12 +499,19 @@ def print_history_summary():
                 status = run.get("status", "unknown")
                 total_time = run.get("timings", {}).get("total", 0)
                 
+                # Get storage backend info if available
+                storage_info = run.get("storage", {})
+                vector_backend = storage_info.get("vector_backend", "")
+                
                 status_emoji = "✅" if status == "passed" else "❌"
-                # Show model name if available
+                # Show model name and storage backend if available
                 if model and model != "unknown":
                     # Truncate long model names for display
                     model_display = model if len(model) <= 20 else model[:17] + "..."
-                    print(f"  {status_emoji} {timestamp[:19]} - {provider:8} - {model_display:20} - {total_time:6.1f}s")
+                    if vector_backend and vector_backend != "nano":
+                        print(f"  {status_emoji} {timestamp[:19]} - {provider:8} - {model_display:20} - {vector_backend:8} - {total_time:6.1f}s")
+                    else:
+                        print(f"  {status_emoji} {timestamp[:19]} - {provider:8} - {model_display:20} - {total_time:6.1f}s")
                 else:
                     print(f"  {status_emoji} {timestamp[:19]} - {provider:8} - {total_time:6.1f}s")
     
