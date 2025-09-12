@@ -608,7 +608,7 @@ class Neo4jStorage(BaseGraphStorage):
             )
         )
 
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             # Fetch community data
             result = await session.run(
                 f"""
@@ -690,7 +690,7 @@ class Neo4jStorage(BaseGraphStorage):
         await self.async_driver.close()
 
     async def _debug_delete_all_node_edges(self):
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             try:
                 # Delete all relationships in the namespace
                 await session.run(f"MATCH (n:`{self.namespace}`)-[r]-() DELETE r")

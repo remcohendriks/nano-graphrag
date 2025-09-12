@@ -124,7 +124,7 @@ class BaseGraphStorage(StorageNameSpace):
     async def node_degree(self, node_id: str) -> int:
         raise NotImplementedError
     
-    async def node_degrees_batch(self, node_ids: List[str]) -> List[str]:
+    async def node_degrees_batch(self, node_ids: List[str]) -> List[int]:
         raise NotImplementedError
 
     async def edge_degree(self, src_id: str, tgt_id: str) -> int:

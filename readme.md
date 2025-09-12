@@ -197,7 +197,7 @@ Below are the components you can use:
 |                 |  [`milvus-lite`](https://github.com/milvus-io/milvus-lite)   |              [examples](./examples)               |
 |                 | [faiss](https://github.com/facebookresearch/faiss?tab=readme-ov-file) |              [examples](./examples)               |
 | Graph Storage   | [`networkx`](https://networkx.org/documentation/stable/index.html) |                     Built-in (default)                      |
-|                 |                [`neo4j`](https://neo4j.com/)                 | Built-in (Production-ready, requires Enterprise+GDS)([doc](./docs/storage/neo4j_production.md)) |
+|                 |                [`neo4j`](https://neo4j.com/)                 | Built-in (**REQUIRES** Neo4j Enterprise Edition with GDS plugin)([doc](./docs/use_neo4j_for_graphrag.md)) |
 | Visualization   |                           graphml                            |              [examples](./examples)               |
 | Chunking        |                        by token size                         |                     Built-in                      |
 |                 |                       by text splitter                       |                     Built-in                      |

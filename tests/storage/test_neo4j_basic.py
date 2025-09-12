@@ -30,7 +30,7 @@ async def test_neo4j_initialization():
         assert storage.neo4j_url == "neo4j://localhost:7687"
         assert storage.neo4j_auth == ("neo4j", "testpassword")
         assert storage.neo4j_database == "neo4j"
-        assert "test_neo4j" in storage.namespace
+        assert storage.namespace == "GraphRAG_test"  # New clean namespace format
 
 
 @pytest.mark.asyncio
