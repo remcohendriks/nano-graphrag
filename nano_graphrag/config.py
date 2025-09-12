@@ -107,6 +107,12 @@ class StorageConfig:
     neo4j_password: str = "password"
     neo4j_database: str = "neo4j"
     
+    # Neo4j production configuration
+    neo4j_max_connection_pool_size: int = 50
+    neo4j_connection_timeout: float = 30.0
+    neo4j_encrypted: bool = True
+    neo4j_max_transaction_retry_time: float = 30.0
+    
     # Node2Vec configuration (for NetworkX backend)
     node2vec: Node2VecConfig = field(default_factory=lambda: Node2VecConfig(enabled=True))
     
@@ -127,7 +133,11 @@ class StorageConfig:
             neo4j_url=os.getenv("NEO4J_URL", "neo4j://localhost:7687"),
             neo4j_username=os.getenv("NEO4J_USERNAME", "neo4j"),
             neo4j_password=os.getenv("NEO4J_PASSWORD", "password"),
-            neo4j_database=os.getenv("NEO4J_DATABASE", "neo4j")
+            neo4j_database=os.getenv("NEO4J_DATABASE", "neo4j"),
+            neo4j_max_connection_pool_size=int(os.getenv("NEO4J_MAX_CONNECTION_POOL_SIZE", "50")),
+            neo4j_connection_timeout=float(os.getenv("NEO4J_CONNECTION_TIMEOUT", "30.0")),
+            neo4j_encrypted=os.getenv("NEO4J_ENCRYPTED", "true").lower() == "true",
+            neo4j_max_transaction_retry_time=float(os.getenv("NEO4J_MAX_TRANSACTION_RETRY_TIME", "30.0"))
         )
     
     def __post_init__(self):
@@ -318,6 +328,10 @@ class GraphRAGConfig:
                 'neo4j_url': self.storage.neo4j_url,
                 'neo4j_auth': (self.storage.neo4j_username, self.storage.neo4j_password),
                 'neo4j_database': self.storage.neo4j_database,
+                'neo4j_max_connection_pool_size': self.storage.neo4j_max_connection_pool_size,
+                'neo4j_connection_timeout': self.storage.neo4j_connection_timeout,
+                'neo4j_encrypted': self.storage.neo4j_encrypted,
+                'neo4j_max_transaction_retry_time': self.storage.neo4j_max_transaction_retry_time,
             }
         
         # Add node2vec configuration if enabled and using NetworkX
