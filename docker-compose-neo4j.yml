@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:5-enterprise
+    container_name: nano-graphrag-neo4j
+    environment:
+      # Authentication
+      NEO4J_AUTH: neo4j/your-secure-password-change-me
+      
+      # Accept Enterprise License
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      
+      # Install plugins (GDS required for nano-graphrag)
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      
+      # Memory configuration (adjust based on your system)
+      NEO4J_server_memory_heap_initial__size: 2G
+      NEO4J_server_memory_heap_max__size: 4G
+      NEO4J_server_memory_pagecache_size: 2G
+      
+      # Additional production settings
+      NEO4J_server_default__listen__address: 0.0.0.0
+      NEO4J_server_bolt_advertised__address: localhost:7687
+      NEO4J_server_http_advertised__address: localhost:7474
+      
+    ports:
+      - "7474:7474"  # Browser UI
+      - "7687:7687"  # Bolt protocol
+      
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+      
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+      
+    restart: unless-stopped
+    
+    networks:
+      - nano-graphrag-network
+
+volumes:
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  neo4j_import:
+    driver: local
+  neo4j_plugins:
+    driver: local
+
+networks:
+  nano-graphrag-network:
+    driver: bridge
+    name: nano-graphrag-network
