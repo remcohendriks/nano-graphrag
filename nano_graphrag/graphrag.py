@@ -165,11 +165,19 @@ class GraphRAG:
             global_config=global_config
         )
         
-        # Initialize vector storage
+        # Create a namespace prefix for vector storage to avoid collisions
+        # Use working_dir basename or a custom prefix from environment
+        import os
+        namespace_prefix = os.getenv("QDRANT_NAMESPACE_PREFIX")
+        if not namespace_prefix:
+            # Use working directory basename as prefix
+            namespace_prefix = Path(self.working_dir).name
+        
+        # Initialize vector storage with prefixed namespaces
         if self.config.query.enable_local:
             self.entities_vdb = StorageFactory.create_vector_storage(
                 backend=self.config.storage.vector_backend,
-                namespace="entities",
+                namespace=f"{namespace_prefix}_entities",
                 global_config=global_config,
                 embedding_func=self.embedding_func,
                 meta_fields={"entity_name", "entity_type"}
@@ -180,7 +188,7 @@ class GraphRAG:
         if self.config.query.enable_naive_rag:
             self.chunks_vdb = StorageFactory.create_vector_storage(
                 backend=self.config.storage.vector_backend,
-                namespace="chunks",
+                namespace=f"{namespace_prefix}_chunks",
                 global_config=global_config,
                 embedding_func=self.embedding_func,
                 meta_fields={"doc_id"}

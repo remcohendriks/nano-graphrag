@@ -83,7 +83,7 @@ class QdrantVectorStorage(BaseVectorStorage):
             return
         
         await self._ensure_collection()
-        logger.info(f"Upserting {len(data)} items to Qdrant collection '{self.namespace}'")
+        logger.info(f"Inserting {len(data)} vectors to {self.namespace}")
         
         # Prepare points
         points = []

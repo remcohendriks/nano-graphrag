@@ -1,0 +1,138 @@
+[
+  {
+    "timestamp": "2025-09-12T19:59:50.194607+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "json",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "passed",
+    "timings": {
+      "insert": 301.0181579589844,
+      "global_query": 32.91173505783081,
+      "local_query": 11.839436054229736,
+      "naive_query": 9.456817150115967,
+      "reload": 8.76512885093689,
+      "total": 364.63820815086365
+    },
+    "counts": {
+      "nodes": 81,
+      "edges": 88,
+      "communities": 39,
+      "chunks": 14
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-12T19:50:48.780529+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "json",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "global_query": 0.03169083595275879,
+      "local_query": 0.5477020740509033,
+      "naive_query": 0.6209399700164795,
+      "reload": 0.013716936111450195,
+      "total": 94.93264412879944
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: Request timed out"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "failed",
+      "local_query": "failed",
+      "naive_query": "failed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-12T18:55:49.067334+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "nano",
+      "graph_backend": "neo4j",
+      "kv_backend": "json"
+    },
+    "status": "passed",
+    "timings": {
+      "insert": 81.95167684555054,
+      "global_query": 30.5456759929657,
+      "local_query": 12.702687978744507,
+      "naive_query": 9.834853172302246,
+      "reload": 10.98572587966919,
+      "total": 146.42726469039917
+    },
+    "counts": {
+      "nodes": 78,
+      "edges": 89,
+      "communities": 31,
+      "chunks": 14
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-12T18:32:15.970749+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "nano",
+      "graph_backend": "neo4j",
+      "kv_backend": "json"
+    },
+    "status": "failed",
+    "timings": {
+      "global_query": 22.717756748199463,
+      "local_query": 10.475961685180664,
+      "naive_query": 8.107839822769165,
+      "reload": 5.390017747879028,
+      "total": 217.0052192211151
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 27,
+      "chunks": 14
+    },
+    "errors": [
+      "Insert failed: Expected >10 nodes, got 0"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  }
+]

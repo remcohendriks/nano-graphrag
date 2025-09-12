@@ -13,10 +13,6 @@ from .._utils import logger
 from ..prompt import GRAPH_FIELD_SEP
 
 
-def make_path_idable(path):
-    return path.replace(".", "_").replace("/", "__").replace("-", "_").replace(":", "_").replace("\\", "__")
-
-
 @dataclass
 class Neo4jStorage(BaseGraphStorage):
     _neo4j_module: Optional[Any] = field(init=False, default=None)
@@ -58,9 +54,17 @@ class Neo4jStorage(BaseGraphStorage):
             "neo4j_batch_size", 1000
         )
         
-        self.namespace = (
-            f"{make_path_idable(self.global_config['working_dir'])}__{self.namespace}"
-        )
+        # Create a cleaner label using environment variable or default
+        # Users can set NEO4J_GRAPH_NAMESPACE to customize the namespace
+        import os
+        custom_namespace = os.getenv("NEO4J_GRAPH_NAMESPACE")
+        if custom_namespace:
+            # Use custom namespace from environment
+            self.namespace = custom_namespace
+        else:
+            # Default: GraphRAG_{namespace} where namespace is cleaned
+            clean_namespace = self.namespace.replace("/", "_").replace("-", "_").replace(".", "_")
+            self.namespace = f"GraphRAG_{clean_namespace}"
         logger.info(f"Using the label {self.namespace} for Neo4j as identifier")
         if self.neo4j_url is None or self.neo4j_auth is None:
             raise ValueError("Missing neo4j_url or neo4j_auth in addon_params")
