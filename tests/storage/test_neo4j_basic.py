@@ -246,6 +246,9 @@ async def test_gds_clustering():
         mock_session.__aexit__ = AsyncMock(return_value=None)
         
         # Mock successful clustering
+        mock_exists_result = AsyncMock()
+        mock_exists_result.single = AsyncMock(return_value={"exists": False})
+        
         mock_result = AsyncMock()
         mock_result.single = AsyncMock(return_value={
             "communityCount": 5,
@@ -253,6 +256,7 @@ async def test_gds_clustering():
         })
         
         mock_session.run = AsyncMock(side_effect=[
+            mock_exists_result,  # Check if graph exists
             None,  # Graph projection
             mock_result,  # Leiden algorithm
             None  # Graph drop
@@ -263,11 +267,15 @@ async def test_gds_clustering():
         # Run clustering
         await storage.clustering("leiden")
         
-        # Verify all three calls were made
-        assert mock_session.run.call_count == 3
+        # Verify all four calls were made (exists check, projection, leiden, drop)
+        assert mock_session.run.call_count == 4
         
         # Check that graph drop is called even on error
+        mock_exists_result_2 = AsyncMock()
+        mock_exists_result_2.single = AsyncMock(return_value={"exists": False})
+        
         mock_session.run = AsyncMock(side_effect=[
+            mock_exists_result_2,  # Check if graph exists
             None,  # Graph projection succeeds
             Exception("Leiden failed"),  # Leiden fails
         ])

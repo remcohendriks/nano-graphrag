@@ -110,8 +110,9 @@ class StorageConfig:
     # Neo4j production configuration
     neo4j_max_connection_pool_size: int = 50
     neo4j_connection_timeout: float = 30.0
-    neo4j_encrypted: bool = True
+    neo4j_encrypted: bool = False  # Default to False, will be inferred from URL
     neo4j_max_transaction_retry_time: float = 30.0
+    neo4j_batch_size: int = 1000  # Batch size for bulk operations
     
     # Node2Vec configuration (for NetworkX backend)
     node2vec: Node2VecConfig = field(default_factory=lambda: Node2VecConfig(enabled=True))
@@ -119,6 +120,23 @@ class StorageConfig:
     @classmethod
     def from_env(cls) -> 'StorageConfig':
         """Create config from environment variables."""
+        # Get Neo4j URL for TLS inference
+        neo4j_url = os.getenv("NEO4J_URL", "neo4j://localhost:7687")
+        
+        # Intelligently infer encryption from URL scheme if not explicitly set
+        if os.getenv("NEO4J_ENCRYPTED") is not None:
+            # Explicit setting takes precedence
+            neo4j_encrypted = os.getenv("NEO4J_ENCRYPTED", "false").lower() == "true"
+        elif neo4j_url.startswith(('neo4j+s://', 'bolt+s://')):
+            # URL uses secure scheme
+            neo4j_encrypted = True
+        elif neo4j_url.startswith(('neo4j://', 'bolt://')):
+            # URL uses non-secure scheme
+            neo4j_encrypted = False
+        else:
+            # Default to False for unknown schemes
+            neo4j_encrypted = False
+            
         return cls(
             vector_backend=os.getenv("STORAGE_VECTOR_BACKEND", "nano"),
             graph_backend=os.getenv("STORAGE_GRAPH_BACKEND", "networkx"),
@@ -130,14 +148,15 @@ class StorageConfig:
             hnsw_max_elements=int(os.getenv("HNSW_MAX_ELEMENTS", "1000000")),
             qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", None),
-            neo4j_url=os.getenv("NEO4J_URL", "neo4j://localhost:7687"),
+            neo4j_url=neo4j_url,
             neo4j_username=os.getenv("NEO4J_USERNAME", "neo4j"),
             neo4j_password=os.getenv("NEO4J_PASSWORD", "password"),
             neo4j_database=os.getenv("NEO4J_DATABASE", "neo4j"),
             neo4j_max_connection_pool_size=int(os.getenv("NEO4J_MAX_CONNECTION_POOL_SIZE", "50")),
             neo4j_connection_timeout=float(os.getenv("NEO4J_CONNECTION_TIMEOUT", "30.0")),
-            neo4j_encrypted=os.getenv("NEO4J_ENCRYPTED", "true").lower() == "true",
-            neo4j_max_transaction_retry_time=float(os.getenv("NEO4J_MAX_TRANSACTION_RETRY_TIME", "30.0"))
+            neo4j_encrypted=neo4j_encrypted,
+            neo4j_max_transaction_retry_time=float(os.getenv("NEO4J_MAX_TRANSACTION_RETRY_TIME", "30.0")),
+            neo4j_batch_size=int(os.getenv("NEO4J_BATCH_SIZE", "1000"))
         )
     
     def __post_init__(self):
@@ -332,6 +351,7 @@ class GraphRAGConfig:
                 'neo4j_connection_timeout': self.storage.neo4j_connection_timeout,
                 'neo4j_encrypted': self.storage.neo4j_encrypted,
                 'neo4j_max_transaction_retry_time': self.storage.neo4j_max_transaction_retry_time,
+                'neo4j_batch_size': self.storage.neo4j_batch_size,
             }
         
         # Add node2vec configuration if enabled and using NetworkX

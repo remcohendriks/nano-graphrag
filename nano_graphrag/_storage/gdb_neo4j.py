@@ -54,6 +54,9 @@ class Neo4jStorage(BaseGraphStorage):
         self.neo4j_max_transaction_retry_time = self.global_config["addon_params"].get(
             "neo4j_max_transaction_retry_time", 30.0
         )
+        self.neo4j_batch_size = self.global_config["addon_params"].get(
+            "neo4j_batch_size", 1000
+        )
         
         self.namespace = (
             f"{make_path_idable(self.global_config['working_dir'])}__{self.namespace}"
@@ -64,6 +67,13 @@ class Neo4jStorage(BaseGraphStorage):
         
         # Setup retry exceptions - will be imported when needed
         self._retry_exceptions = None
+        
+        # Cache retry decorator to avoid recreation overhead
+        self._retry_decorator = self._get_retry_decorator()
+        
+        # Initialize operation metrics
+        from collections import defaultdict
+        self._operation_counts = defaultdict(int)
         
         # Initialize driver without database parameter (CODEX-001 fix)
         self.async_driver = self.neo4j.AsyncGraphDatabase.driver(
@@ -113,8 +123,9 @@ class Neo4jStorage(BaseGraphStorage):
                 return True
             except Exception as e:
                 error_msg = (
-                    "Neo4j Graph Data Science (GDS) library is not available. "
-                    "Neo4j Enterprise Edition with GDS is required for production use. "
+                    "Neo4j Graph Data Science (GDS) library is required for Neo4j backend. "
+                    "Please use Neo4j Enterprise Edition with GDS installed, or switch to "
+                    "'networkx' graph backend for Community Edition compatibility. "
                     f"Error: {e}"
                 )
                 logger.error(error_msg)
@@ -187,7 +198,7 @@ class Neo4jStorage(BaseGraphStorage):
         await self._check_gds_availability()
 
     async def has_node(self, node_id: str) -> bool:
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             result = await session.run(
                 f"MATCH (n:`{self.namespace}`) WHERE n.id = $node_id RETURN COUNT(n) > 0 AS exists",
                 node_id=node_id,
@@ -196,7 +207,7 @@ class Neo4jStorage(BaseGraphStorage):
             return record["exists"] if record else False
 
     async def has_edge(self, source_node_id: str, target_node_id: str) -> bool:
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             result = await session.run(
                 f"""
                 MATCH (s:`{self.namespace}`)
@@ -221,7 +232,7 @@ class Neo4jStorage(BaseGraphStorage):
             return []
                     
         result_dict = {node_id: 0 for node_id in node_ids}
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             result = await session.run(
                 f"""
                 UNWIND $node_ids AS node_id
@@ -251,7 +262,7 @@ class Neo4jStorage(BaseGraphStorage):
         edges_params = [{"src_id": src, "tgt_id": tgt} for src, tgt in edge_pairs]
         
         try:
-            async with self.async_driver.session() as session:
+            async with self.async_driver.session(database=self.neo4j_database) as session:
                 result = await session.run(
                     f"""
                     UNWIND $edges AS edge
@@ -290,9 +301,8 @@ class Neo4jStorage(BaseGraphStorage):
 
 
     async def get_node(self, node_id: str) -> Union[dict, None]:
-        # Apply retry decorator for resilience
-        retry_decorator = self._get_retry_decorator()
-        retried_func = retry_decorator(self.get_nodes_batch)
+        # Apply cached retry decorator for resilience
+        retried_func = self._retry_decorator(self.get_nodes_batch)
         result = await retried_func([node_id])
         return result[0] if result else None
 
@@ -303,7 +313,7 @@ class Neo4jStorage(BaseGraphStorage):
         result_dict = {node_id: None for node_id in node_ids}
 
         try:
-            async with self.async_driver.session() as session:
+            async with self.async_driver.session(database=self.neo4j_database) as session:
                 result = await session.run(
                     f"""
                     UNWIND $node_ids AS node_id
@@ -339,9 +349,8 @@ class Neo4jStorage(BaseGraphStorage):
     async def get_edge(
         self, source_node_id: str, target_node_id: str
     ) -> Union[dict, None]:
-        # Apply retry decorator for resilience
-        retry_decorator = self._get_retry_decorator()
-        retried_func = retry_decorator(self.get_edges_batch)
+        # Apply cached retry decorator for resilience
+        retried_func = self._retry_decorator(self.get_edges_batch)
         results = await retried_func([(source_node_id, target_node_id)])
         return results[0] if results else None
 
@@ -356,7 +365,7 @@ class Neo4jStorage(BaseGraphStorage):
         edges_params = [{"source_id": src, "target_id": tgt} for src, tgt in edge_pairs]
         
         try:
-            async with self.async_driver.session() as session:
+            async with self.async_driver.session(database=self.neo4j_database) as session:
                 result = await session.run(
                     f"""
                     UNWIND $edges AS edge
@@ -395,7 +404,7 @@ class Neo4jStorage(BaseGraphStorage):
         result_dict = {node_id: [] for node_id in node_ids}
         
         try:
-            async with self.async_driver.session() as session:
+            async with self.async_driver.session(database=self.neo4j_database) as session:
                 result = await session.run(
                     f"""
                     UNWIND $node_ids AS node_id
@@ -419,15 +428,27 @@ class Neo4jStorage(BaseGraphStorage):
             return [[] for _ in node_ids]
 
     async def upsert_node(self, node_id: str, node_data: dict[str, str]):
-        # Apply retry decorator dynamically
-        retry_decorator = self._get_retry_decorator()
-        retried_func = retry_decorator(self.upsert_nodes_batch)
+        # Track operation
+        self._operation_counts['upsert_node'] += 1
+        # Apply cached retry decorator
+        retried_func = self._retry_decorator(self.upsert_nodes_batch)
         await retried_func([(node_id, node_data)])
 
     async def upsert_nodes_batch(self, nodes_data: list[tuple[str, dict[str, str]]]):
         if not nodes_data:
             return []
         
+        # Track operation
+        self._operation_counts['upsert_nodes_batch'] += 1
+        
+        # Process in chunks to prevent OOM
+        batch_size = self.neo4j_batch_size
+        for i in range(0, len(nodes_data), batch_size):
+            chunk = nodes_data[i:i + batch_size]
+            await self._process_nodes_chunk(chunk)
+    
+    async def _process_nodes_chunk(self, nodes_data: list[tuple[str, dict[str, str]]]):
+        """Process a chunk of nodes."""
         nodes_by_type = {}
         for node_id, node_data in nodes_data:
             # Sanitize entity_type to prevent injection attacks
@@ -453,9 +474,10 @@ class Neo4jStorage(BaseGraphStorage):
     async def upsert_edge(
         self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]
     ):
-        # Apply retry decorator dynamically
-        retry_decorator = self._get_retry_decorator()
-        retried_func = retry_decorator(self.upsert_edges_batch)
+        # Track operation
+        self._operation_counts['upsert_edge'] += 1
+        # Apply cached retry decorator
+        retried_func = self._retry_decorator(self.upsert_edges_batch)
         await retried_func([(source_node_id, target_node_id, edge_data)])
 
 
@@ -506,11 +528,21 @@ class Neo4jStorage(BaseGraphStorage):
         
         async with self.async_driver.session(database=self.neo4j_database) as session:
             try:
+                # Check if graph already exists and drop it if so
+                graph_name = f'graph_{self.namespace}'
+                exists_result = await session.run(
+                    f"CALL gds.graph.exists('{graph_name}') YIELD exists"
+                )
+                exists_record = await exists_result.single()
+                if exists_record and exists_record['exists']:
+                    await session.run(f"CALL gds.graph.drop('{graph_name}')")
+                    logger.info(f"Dropped existing GDS projection '{graph_name}'")
+                
                 # Project the graph with undirected relationships
                 await session.run(
                     f"""
                     CALL gds.graph.project(
-                        'graph_{self.namespace}',
+                        '{graph_name}',
                         ['{self.namespace}'],
                         {{
                             RELATED: {{
@@ -527,7 +559,7 @@ class Neo4jStorage(BaseGraphStorage):
                 result = await session.run(
                     f"""
                     CALL gds.leiden.write(
-                        'graph_{self.namespace}',
+                        '{graph_name}',
                         {{
                             writeProperty: 'communityIds',
                             includeIntermediateCommunities: True,
@@ -555,7 +587,7 @@ class Neo4jStorage(BaseGraphStorage):
                 # Only drop the projected graph if it was successfully created
                 if graph_created:
                     try:
-                        await session.run(f"CALL gds.graph.drop('graph_{self.namespace}')")
+                        await session.run(f"CALL gds.graph.drop('{graph_name}')")
                     except Exception as e:
                         logger.warning(f"Failed to drop projected graph: {e}")
 
@@ -641,6 +673,15 @@ class Neo4jStorage(BaseGraphStorage):
 
         return dict(results)
 
+    async def get_pool_stats(self) -> dict:
+        """Get connection pool statistics for monitoring."""
+        return {
+            "max_size": self.neo4j_max_connection_pool_size,
+            "database": self.neo4j_database,
+            "encrypted": self.neo4j_encrypted,
+            "operation_counts": dict(self._operation_counts)
+        }
+    
     async def index_done_callback(self):
         await self.async_driver.close()
 
