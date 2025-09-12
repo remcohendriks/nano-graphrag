@@ -13,7 +13,7 @@ class StorageFactory:
     
     # Maintain current restrictions from StorageConfig
     ALLOWED_VECTOR = {"nano", "hnswlib", "qdrant"}
-    ALLOWED_GRAPH = {"networkx"}
+    ALLOWED_GRAPH = {"networkx", "neo4j"}
     ALLOWED_KV = {"json"}
     
     @classmethod
@@ -232,7 +232,7 @@ def _register_backends():
     # Register graph backends if not already registered
     if not StorageFactory._graph_backends:
         StorageFactory.register_graph("networkx", _get_networkx_storage)
-        # Note: Neo4j is not in ALLOWED_GRAPH by default, would need to be added
+        StorageFactory.register_graph("neo4j", _get_neo4j_storage)
     
     # Register KV backends if not already registered
     if not StorageFactory._kv_backends:

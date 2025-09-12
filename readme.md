@@ -72,6 +72,9 @@ pip install nano-graphrag[qdrant]
 
 # Install with HNSW vector database support  
 pip install nano-graphrag[hnsw]
+
+# Install with Neo4j graph database support (requires Neo4j Enterprise with GDS)
+pip install nano-graphrag[neo4j]
 ```
 
 
@@ -193,8 +196,8 @@ Below are the components you can use:
 |                 |           [`qdrant`](https://qdrant.tech/)                   |                     Built-in                      |
 |                 |  [`milvus-lite`](https://github.com/milvus-io/milvus-lite)   |              [examples](./examples)               |
 |                 | [faiss](https://github.com/facebookresearch/faiss?tab=readme-ov-file) |              [examples](./examples)               |
-| Graph Storage   | [`networkx`](https://networkx.org/documentation/stable/index.html) |                     Built-in                      |
-|                 |                [`neo4j`](https://neo4j.com/)                 | Built-in([doc](./docs/use_neo4j_for_graphrag.md)) |
+| Graph Storage   | [`networkx`](https://networkx.org/documentation/stable/index.html) |                     Built-in (default)                      |
+|                 |                [`neo4j`](https://neo4j.com/)                 | Built-in (**REQUIRES** Neo4j Enterprise Edition with GDS plugin)([doc](./docs/use_neo4j_for_graphrag.md)) |
 | Visualization   |                           graphml                            |              [examples](./examples)               |
 | Chunking        |                        by token size                         |                     Built-in                      |
 |                 |                       by text splitter                       |                     Built-in                      |
@@ -376,8 +379,8 @@ You can replace all storage-related components to your own implementation, `nano
 
 **`base.BaseGraphStorage` for storing knowledge graph**
 
-- By default we use [`networkx`](https://github.com/networkx/networkx) as the backend.
-- We have a built-in `Neo4jStorage` for graph, check out this [tutorial](./docs/use_neo4j_for_graphrag.md).
+- By default we use [`networkx`](https://github.com/networkx/networkx) as the backend for Community Edition compatibility.
+- We have production-ready `Neo4jStorage` for graph with full GDS support (requires Neo4j Enterprise), check out the [production guide](./docs/storage/neo4j_production.md).
 - `GraphRAG(.., graph_storage_cls=YOURS,...)`
 
 You can refer to `nano_graphrag.base` to see detailed interfaces for each components.

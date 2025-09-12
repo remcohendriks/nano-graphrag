@@ -1,20 +1,16 @@
 import json
 import asyncio
+import re
 from collections import defaultdict
 from typing import List, TYPE_CHECKING, Optional, Any, Union
 from dataclasses import dataclass, field
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 if TYPE_CHECKING:
     from neo4j import AsyncGraphDatabase
 from ..base import BaseGraphStorage, SingleCommunitySchema
 from .._utils import logger
 from ..prompt import GRAPH_FIELD_SEP
-
-neo4j_lock = asyncio.Lock()
-
-
-def make_path_idable(path):
-    return path.replace(".", "_").replace("/", "__").replace("-", "_").replace(":", "_").replace("\\", "__")
 
 
 @dataclass
@@ -36,79 +32,177 @@ class Neo4jStorage(BaseGraphStorage):
         return self._neo4j_module
     
     def __post_init__(self):
+        # Get configuration from addon_params
         self.neo4j_url = self.global_config["addon_params"].get("neo4j_url", None)
         self.neo4j_auth = self.global_config["addon_params"].get("neo4j_auth", None)
-        self.namespace = (
-            f"{make_path_idable(self.global_config['working_dir'])}__{self.namespace}"
+        self.neo4j_database = self.global_config["addon_params"].get("neo4j_database", "neo4j")
+        
+        # Get production configuration parameters
+        self.neo4j_max_connection_pool_size = self.global_config["addon_params"].get(
+            "neo4j_max_connection_pool_size", 50
         )
+        self.neo4j_connection_timeout = self.global_config["addon_params"].get(
+            "neo4j_connection_timeout", 30.0
+        )
+        self.neo4j_encrypted = self.global_config["addon_params"].get(
+            "neo4j_encrypted", True
+        )
+        self.neo4j_max_transaction_retry_time = self.global_config["addon_params"].get(
+            "neo4j_max_transaction_retry_time", 30.0
+        )
+        self.neo4j_batch_size = self.global_config["addon_params"].get(
+            "neo4j_batch_size", 1000
+        )
+        
+        # Create a cleaner label using environment variable or default
+        # Users can set NEO4J_GRAPH_NAMESPACE to customize the namespace
+        import os
+        custom_namespace = os.getenv("NEO4J_GRAPH_NAMESPACE")
+        if custom_namespace:
+            # Use custom namespace from environment
+            self.namespace = custom_namespace
+        else:
+            # Default: GraphRAG_{namespace} where namespace is cleaned
+            clean_namespace = self.namespace.replace("/", "_").replace("-", "_").replace(".", "_")
+            self.namespace = f"GraphRAG_{clean_namespace}"
         logger.info(f"Using the label {self.namespace} for Neo4j as identifier")
         if self.neo4j_url is None or self.neo4j_auth is None:
             raise ValueError("Missing neo4j_url or neo4j_auth in addon_params")
+        
+        # Setup retry exceptions - will be imported when needed
+        self._retry_exceptions = None
+        
+        # Cache retry decorator to avoid recreation overhead
+        self._retry_decorator = self._get_retry_decorator()
+        
+        # Initialize operation metrics
+        from collections import defaultdict
+        self._operation_counts = defaultdict(int)
+        
+        # Initialize driver without database parameter (CODEX-001 fix)
         self.async_driver = self.neo4j.AsyncGraphDatabase.driver(
-            self.neo4j_url, auth=self.neo4j_auth, max_connection_pool_size=50,      
+            self.neo4j_url, 
+            auth=self.neo4j_auth, 
+            max_connection_pool_size=self.neo4j_max_connection_pool_size,
+            connection_timeout=self.neo4j_connection_timeout,
+            encrypted=self.neo4j_encrypted,
+            max_transaction_retry_time=self.neo4j_max_transaction_retry_time
         )
 
-    # async def create_database(self):
-    #     async with self.async_driver.session() as session:
-    #         try:
-    #             constraints = await session.run("SHOW CONSTRAINTS")
-    #             # TODO I don't know why CREATE CONSTRAINT IF NOT EXISTS still trigger error
-    #             # so have to check if the constrain exists
-    #             constrain_exists = False
-
-    #             async for record in constraints:
-    #                 if (
-    #                     self.namespace in record["labelsOrTypes"]
-    #                     and "id" in record["properties"]
-    #                     and record["type"] == "UNIQUENESS"
-    #                 ):
-    #                     constrain_exists = True
-    #                     break
-    #             if not constrain_exists:
-    #                 await session.run(
-    #                     f"CREATE CONSTRAINT FOR (n:{self.namespace}) REQUIRE n.id IS UNIQUE"
-    #                 )
-    #                 logger.info(f"Add constraint for namespace: {self.namespace}")
-
-    #         except Exception as e:
-    #             logger.error(f"Error accessing or setting up the database: {str(e)}")
-    #             raise
+    def _get_retry_decorator(self):
+        """Get retry decorator with Neo4j exceptions."""
+        try:
+            from neo4j.exceptions import ServiceUnavailable, SessionExpired
+            return retry(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=1, min=1, max=10),
+                retry=retry_if_exception_type((ServiceUnavailable, SessionExpired))
+            )
+        except ImportError:
+            # If exceptions not available, just retry on any exception
+            return retry(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=1, min=1, max=10)
+            )
+    
+    def _sanitize_label(self, label: str) -> str:
+        """Sanitize label to prevent injection attacks."""
+        if not label:
+            return "UNKNOWN"
+        # Allow only alphanumeric and underscore
+        sanitized = re.sub(r'[^A-Za-z0-9_]', '_', label)
+        # Ensure it starts with a letter or underscore
+        if sanitized and not sanitized[0].isalpha() and sanitized[0] != '_':
+            sanitized = '_' + sanitized
+        return sanitized or "UNKNOWN"
+    
+    async def _check_gds_availability(self):
+        """Check if Graph Data Science library is available."""
+        async with self.async_driver.session(database=self.neo4j_database) as session:
+            try:
+                result = await session.run("CALL gds.version()")
+                record = await result.single()
+                version = record.get("version") if record else None
+                logger.info(f"Neo4j GDS version {version} is available")
+                return True
+            except Exception as e:
+                error_msg = (
+                    "Neo4j Graph Data Science (GDS) library is required for Neo4j backend. "
+                    "Please use Neo4j Enterprise Edition with GDS installed, or switch to "
+                    "'networkx' graph backend for Community Edition compatibility. "
+                    f"Error: {e}"
+                )
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+    
+    async def _ensure_constraints(self):
+        """Create constraints and indexes with proper async handling."""
+        async with self.async_driver.session(database=self.neo4j_database) as session:
+            async def create_constraints(tx):
+                # Check existing constraints
+                result = await tx.run("SHOW CONSTRAINTS")
+                existing_constraints = set()
+                async for record in result:
+                    labels = record.get("labelsOrTypes", [])
+                    props = record.get("properties", [])
+                    if self.namespace in labels:
+                        existing_constraints.add(tuple(props))
+                
+                # Create uniqueness constraint (also creates index)
+                if ("id",) not in existing_constraints:
+                    await tx.run(
+                        f"CREATE CONSTRAINT IF NOT EXISTS "
+                        f"FOR (n:`{self.namespace}`) "
+                        f"REQUIRE n.id IS UNIQUE"
+                    )
+                    logger.info(f"Created uniqueness constraint for {self.namespace}.id")
+                
+                # Check existing indexes
+                result = await tx.run("SHOW INDEXES")
+                existing_indexes = set()
+                async for record in result:
+                    labels = record.get("labelsOrTypes", [])
+                    props = record.get("properties", [])
+                    if self.namespace in labels:
+                        existing_indexes.add(tuple(props))
+                
+                # Create additional indexes for performance (skip ID as constraint creates it)
+                indexes_to_create = [
+                    ("entity_type",),  # For filtering by type
+                    ("communityIds",),  # For clustering queries
+                    ("source_id",)  # For chunk tracking
+                ]
+                
+                for index_props in indexes_to_create:
+                    if index_props not in existing_indexes and index_props != ("id",):
+                        prop_name = index_props[0]
+                        await tx.run(
+                            f"CREATE INDEX IF NOT EXISTS "
+                            f"FOR (n:`{self.namespace}`) "
+                            f"ON (n.{prop_name})"
+                        )
+                        logger.info(f"Created index for {self.namespace}.{prop_name}")
+            
+            try:
+                await session.execute_write(create_constraints)
+            except Exception as e:
+                logger.warning(f"Constraint/index creation warning: {e}")
 
     async def _init_workspace(self):
         await self.async_driver.verify_authentication()
         await self.async_driver.verify_connectivity()
-        # TODOLater: create database if not exists always cause an error when async
-        # await self.create_database()
+        # Create constraints with proper async handling
+        await self._ensure_constraints()
 
     async def index_start_callback(self):
         logger.info("Init Neo4j workspace")
         await self._init_workspace()
         
-        # create index for faster searching
-        try:
-            async with self.async_driver.session() as session:
-                await session.run(
-                    f"CREATE INDEX IF NOT EXISTS FOR (n:`{self.namespace}`) ON (n.id)"
-                )
-                
-                await session.run(
-                    f"CREATE INDEX IF NOT EXISTS FOR (n:`{self.namespace}`) ON (n.entity_type)"
-                )
-                
-                await session.run(
-                    f"CREATE INDEX IF NOT EXISTS FOR (n:`{self.namespace}`) ON (n.communityIds)"
-                )
-                
-                await session.run(
-                    f"CREATE INDEX IF NOT EXISTS FOR (n:`{self.namespace}`) ON (n.source_id)"
-                )          
-                logger.info("Neo4j indexes created successfully")                
-        except Exception as e:
-            logger.error(f"Failed to create indexes: {e}")
-            raise e
+        # Check GDS availability (fail fast if not available)
+        await self._check_gds_availability()
 
     async def has_node(self, node_id: str) -> bool:
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             result = await session.run(
                 f"MATCH (n:`{self.namespace}`) WHERE n.id = $node_id RETURN COUNT(n) > 0 AS exists",
                 node_id=node_id,
@@ -117,7 +211,7 @@ class Neo4jStorage(BaseGraphStorage):
             return record["exists"] if record else False
 
     async def has_edge(self, source_node_id: str, target_node_id: str) -> bool:
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             result = await session.run(
                 f"""
                 MATCH (s:`{self.namespace}`)
@@ -137,12 +231,12 @@ class Neo4jStorage(BaseGraphStorage):
         results = await self.node_degrees_batch([node_id])
         return results[0] if results else 0
         
-    async def node_degrees_batch(self, node_ids: List[str]) -> List[str]:
+    async def node_degrees_batch(self, node_ids: List[str]) -> List[int]:
         if not node_ids:
-            return {}
+            return []
                     
         result_dict = {node_id: 0 for node_id in node_ids}
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             result = await session.run(
                 f"""
                 UNWIND $node_ids AS node_id
@@ -172,7 +266,7 @@ class Neo4jStorage(BaseGraphStorage):
         edges_params = [{"src_id": src, "tgt_id": tgt} for src, tgt in edge_pairs]
         
         try:
-            async with self.async_driver.session() as session:
+            async with self.async_driver.session(database=self.neo4j_database) as session:
                 result = await session.run(
                     f"""
                     UNWIND $edges AS edge
@@ -211,7 +305,9 @@ class Neo4jStorage(BaseGraphStorage):
 
 
     async def get_node(self, node_id: str) -> Union[dict, None]:
-        result = await self.get_nodes_batch([node_id])
+        # Apply cached retry decorator for resilience
+        retried_func = self._retry_decorator(self.get_nodes_batch)
+        result = await retried_func([node_id])
         return result[0] if result else None
 
     async def get_nodes_batch(self, node_ids: list[str]) -> list[Union[dict, None]]:
@@ -221,7 +317,7 @@ class Neo4jStorage(BaseGraphStorage):
         result_dict = {node_id: None for node_id in node_ids}
 
         try:
-            async with self.async_driver.session() as session:
+            async with self.async_driver.session(database=self.neo4j_database) as session:
                 result = await session.run(
                     f"""
                     UNWIND $node_ids AS node_id
@@ -257,7 +353,9 @@ class Neo4jStorage(BaseGraphStorage):
     async def get_edge(
         self, source_node_id: str, target_node_id: str
     ) -> Union[dict, None]:
-        results = await self.get_edges_batch([(source_node_id, target_node_id)])
+        # Apply cached retry decorator for resilience
+        retried_func = self._retry_decorator(self.get_edges_batch)
+        results = await retried_func([(source_node_id, target_node_id)])
         return results[0] if results else None
 
     async def get_edges_batch(
@@ -271,7 +369,7 @@ class Neo4jStorage(BaseGraphStorage):
         edges_params = [{"source_id": src, "target_id": tgt} for src, tgt in edge_pairs]
         
         try:
-            async with self.async_driver.session() as session:
+            async with self.async_driver.session(database=self.neo4j_database) as session:
                 result = await session.run(
                     f"""
                     UNWIND $edges AS edge
@@ -310,7 +408,7 @@ class Neo4jStorage(BaseGraphStorage):
         result_dict = {node_id: [] for node_id in node_ids}
         
         try:
-            async with self.async_driver.session() as session:
+            async with self.async_driver.session(database=self.neo4j_database) as session:
                 result = await session.run(
                     f"""
                     UNWIND $node_ids AS node_id
@@ -334,20 +432,37 @@ class Neo4jStorage(BaseGraphStorage):
             return [[] for _ in node_ids]
 
     async def upsert_node(self, node_id: str, node_data: dict[str, str]):
-        await self.upsert_nodes_batch([(node_id, node_data)])
+        # Track operation
+        self._operation_counts['upsert_node'] += 1
+        # Apply cached retry decorator
+        retried_func = self._retry_decorator(self.upsert_nodes_batch)
+        await retried_func([(node_id, node_data)])
 
     async def upsert_nodes_batch(self, nodes_data: list[tuple[str, dict[str, str]]]):
         if not nodes_data:
             return []
         
+        # Track operation
+        self._operation_counts['upsert_nodes_batch'] += 1
+        
+        # Process in chunks to prevent OOM
+        batch_size = self.neo4j_batch_size
+        for i in range(0, len(nodes_data), batch_size):
+            chunk = nodes_data[i:i + batch_size]
+            await self._process_nodes_chunk(chunk)
+    
+    async def _process_nodes_chunk(self, nodes_data: list[tuple[str, dict[str, str]]]):
+        """Process a chunk of nodes."""
         nodes_by_type = {}
         for node_id, node_data in nodes_data:
-            node_type = node_data.get("entity_type", "UNKNOWN").strip('"')
+            # Sanitize entity_type to prevent injection attacks
+            raw_type = node_data.get("entity_type", "UNKNOWN").strip('"')
+            node_type = self._sanitize_label(raw_type)
             if node_type not in nodes_by_type:
                 nodes_by_type[node_type] = []
             nodes_by_type[node_type].append((node_id, node_data))
         
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             for node_type, type_nodes in nodes_by_type.items():
                 params = [{"id": node_id, "data": node_data} for node_id, node_data in type_nodes]
                 
@@ -363,7 +478,11 @@ class Neo4jStorage(BaseGraphStorage):
     async def upsert_edge(
         self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]
     ):
-        await self.upsert_edges_batch([(source_node_id, target_node_id, edge_data)])
+        # Track operation
+        self._operation_counts['upsert_edge'] += 1
+        # Apply cached retry decorator
+        retried_func = self._retry_decorator(self.upsert_edges_batch)
+        await retried_func([(source_node_id, target_node_id, edge_data)])
 
 
     async def upsert_edges_batch(
@@ -383,7 +502,7 @@ class Neo4jStorage(BaseGraphStorage):
                 "edge_data": edge_data_copy
             })
         
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             await session.run(
                 f"""
                 UNWIND $edges AS edge
@@ -409,13 +528,25 @@ class Neo4jStorage(BaseGraphStorage):
 
         random_seed = self.global_config["graph_cluster_seed"]
         max_level = self.global_config["max_graph_cluster_size"]
-        async with self.async_driver.session() as session:
+        graph_created = False
+        
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             try:
+                # Check if graph already exists and drop it if so
+                graph_name = f'graph_{self.namespace}'
+                exists_result = await session.run(
+                    f"CALL gds.graph.exists('{graph_name}') YIELD exists"
+                )
+                exists_record = await exists_result.single()
+                if exists_record and exists_record['exists']:
+                    await session.run(f"CALL gds.graph.drop('{graph_name}')")
+                    logger.info(f"Dropped existing GDS projection '{graph_name}'")
+                
                 # Project the graph with undirected relationships
                 await session.run(
                     f"""
                     CALL gds.graph.project(
-                        'graph_{self.namespace}',
+                        '{graph_name}',
                         ['{self.namespace}'],
                         {{
                             RELATED: {{
@@ -426,12 +557,13 @@ class Neo4jStorage(BaseGraphStorage):
                     )
                     """
                 )
+                graph_created = True
 
                 # Run Leiden algorithm
                 result = await session.run(
                     f"""
                     CALL gds.leiden.write(
-                        'graph_{self.namespace}',
+                        '{graph_name}',
                         {{
                             writeProperty: 'communityIds',
                             includeIntermediateCommunities: True,
@@ -447,14 +579,21 @@ class Neo4jStorage(BaseGraphStorage):
                     """
                 )
                 result = await result.single()
-                community_count: int = result["communityCount"]
-                modularities = result["modularities"]
+                community_count: int = result["communityCount"] if result else 0
+                modularities = result["modularities"] if result else []
                 logger.info(
                     f"Performed graph clustering with {community_count} communities and modularities {modularities}"
                 )
+            except Exception as e:
+                logger.error(f"Error during GDS clustering: {e}")
+                raise
             finally:
-                # Drop the projected graph
-                await session.run(f"CALL gds.graph.drop('graph_{self.namespace}')")
+                # Only drop the projected graph if it was successfully created
+                if graph_created:
+                    try:
+                        await session.run(f"CALL gds.graph.drop('{graph_name}')")
+                    except Exception as e:
+                        logger.warning(f"Failed to drop projected graph: {e}")
 
     async def community_schema(self) -> dict[str, SingleCommunitySchema]:
         results = defaultdict(
@@ -469,7 +608,7 @@ class Neo4jStorage(BaseGraphStorage):
             )
         )
 
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             # Fetch community data
             result = await session.run(
                 f"""
@@ -485,28 +624,40 @@ class Neo4jStorage(BaseGraphStorage):
 
             max_num_ids = 0
             async for record in result:
-                for index, c_id in enumerate(record["cluster_key"]):
-                    node_id = str(record["node_id"])
-                    source_id = record["source_id"]
+                # Guard against None values
+                cluster_keys = record.get("cluster_key")
+                if cluster_keys is None:
+                    continue
+                    
+                node_id = str(record.get("node_id", ""))
+                source_id = record.get("source_id")
+                connected_nodes = record.get("connected_nodes", [])
+                
+                for index, c_id in enumerate(cluster_keys):
                     level = index
                     cluster_key = str(c_id)
-                    connected_nodes = record["connected_nodes"]
 
                     results[cluster_key]["level"] = level
                     results[cluster_key]["title"] = f"Cluster {cluster_key}"
                     results[cluster_key]["nodes"].add(node_id)
-                    results[cluster_key]["edges"].update(
-                        [
-                            tuple(sorted([node_id, str(connected)]))
-                            for connected in connected_nodes
-                            if connected != node_id
-                        ]
-                    )
-                    chunk_ids = source_id.split(GRAPH_FIELD_SEP)
-                    results[cluster_key]["chunk_ids"].update(chunk_ids)
-                    max_num_ids = max(
-                        max_num_ids, len(results[cluster_key]["chunk_ids"])
-                    )
+                    
+                    # Add edges if we have connected nodes
+                    if connected_nodes:
+                        results[cluster_key]["edges"].update(
+                            [
+                                tuple(sorted([node_id, str(connected)]))
+                                for connected in connected_nodes
+                                if connected and connected != node_id
+                            ]
+                        )
+                    
+                    # Add chunk IDs if source_id exists
+                    if source_id:
+                        chunk_ids = source_id.split(GRAPH_FIELD_SEP)
+                        results[cluster_key]["chunk_ids"].update(chunk_ids)
+                        max_num_ids = max(
+                            max_num_ids, len(results[cluster_key]["chunk_ids"])
+                        )
 
             # Process results
             for k, v in results.items():
@@ -526,11 +677,20 @@ class Neo4jStorage(BaseGraphStorage):
 
         return dict(results)
 
+    async def get_pool_stats(self) -> dict:
+        """Get connection pool statistics for monitoring."""
+        return {
+            "max_size": self.neo4j_max_connection_pool_size,
+            "database": self.neo4j_database,
+            "encrypted": self.neo4j_encrypted,
+            "operation_counts": dict(self._operation_counts)
+        }
+    
     async def index_done_callback(self):
         await self.async_driver.close()
 
     async def _debug_delete_all_node_edges(self):
-        async with self.async_driver.session() as session:
+        async with self.async_driver.session(database=self.neo4j_database) as session:
             try:
                 # Delete all relationships in the namespace
                 await session.run(f"MATCH (n:`{self.namespace}`)-[r]-() DELETE r")

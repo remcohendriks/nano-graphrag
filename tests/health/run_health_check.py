@@ -10,11 +10,18 @@ import time
 import asyncio
 import json
 import shutil
+import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from datetime import datetime, timezone
 from dotenv import load_dotenv
+
+# Configure logging to show INFO level messages
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s:%(name)s:%(message)s'
+)
 
 # Add parent directory to path to import nano_graphrag
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -124,25 +131,68 @@ class HealthCheck:
     
     def count_graph_elements(self) -> Tuple[int, int]:
         """Count nodes and edges in the generated graph."""
-        graphml_path = self.working_dir / "graph_chunk_entity_relation.graphml"
-        if not graphml_path.exists():
-            return 0, 0
+        # Check if we're using Neo4j backend
+        graph_backend = os.environ.get("STORAGE_GRAPH_BACKEND", "networkx")
         
-        try:
-            tree = ET.parse(graphml_path)
-            root = tree.getroot()
+        if graph_backend == "neo4j":
+            # Count nodes and edges from Neo4j
+            try:
+                from neo4j import GraphDatabase
+                
+                neo4j_url = os.environ.get("NEO4J_URL", "neo4j://localhost:7687")
+                neo4j_username = os.environ.get("NEO4J_USERNAME", "neo4j")
+                neo4j_password = os.environ.get("NEO4J_PASSWORD", "neo4j")
+                neo4j_database = os.environ.get("NEO4J_DATABASE", "neo4j")
+                
+                driver = GraphDatabase.driver(neo4j_url, auth=(neo4j_username, neo4j_password))
+                
+                with driver.session(database=neo4j_database) as session:
+                    # Count all nodes with the namespace label
+                    # Check for custom namespace from environment
+                    custom_namespace = os.environ.get("NEO4J_GRAPH_NAMESPACE")
+                    if custom_namespace:
+                        namespace_label = custom_namespace
+                    else:
+                        # Default format: GraphRAG_{namespace}
+                        clean_namespace = f"{self.working_dir.name}_chunk_entity_relation"
+                        clean_namespace = clean_namespace.replace("/", "_").replace("-", "_").replace(".", "_")
+                        namespace_label = f"GraphRAG_{clean_namespace}"
+                    
+                    # Count nodes
+                    result = session.run(f"MATCH (n:`{namespace_label}`) RETURN count(n) as count")
+                    node_count = result.single()["count"]
+                    
+                    # Count relationships
+                    result = session.run(f"MATCH (:`{namespace_label}`)-[r]->(:`{namespace_label}`) RETURN count(r) as count")
+                    edge_count = result.single()["count"]
+                    
+                driver.close()
+                return node_count, edge_count
+                
+            except Exception as e:
+                print(f"Error querying Neo4j: {e}")
+                return 0, 0
+        else:
+            # Default: look for GraphML file
+            graphml_path = self.working_dir / "graph_chunk_entity_relation.graphml"
+            if not graphml_path.exists():
+                return 0, 0
             
-            # GraphML namespace
-            ns = {'g': 'http://graphml.graphdrawing.org/xmlns'}
-            
-            # Count nodes and edges
-            nodes = root.findall('.//g:node', ns)
-            edges = root.findall('.//g:edge', ns)
-            
-            return len(nodes), len(edges)
-        except Exception as e:
-            print(f"Error parsing GraphML: {e}")
-            return 0, 0
+            try:
+                tree = ET.parse(graphml_path)
+                root = tree.getroot()
+                
+                # GraphML namespace
+                ns = {'g': 'http://graphml.graphdrawing.org/xmlns'}
+                
+                # Count nodes and edges
+                nodes = root.findall('.//g:node', ns)
+                edges = root.findall('.//g:edge', ns)
+                
+                return len(nodes), len(edges)
+            except Exception as e:
+                print(f"Error parsing GraphML: {e}")
+                return 0, 0
     
     async def test_insert_and_build(self, graph: GraphRAG, text: str) -> bool:
         """Test document insertion and graph building."""
@@ -462,6 +512,68 @@ class HealthCheck:
             return False
         
         finally:
+            # Clean up Neo4j if we're using it
+            if os.environ.get("STORAGE_GRAPH_BACKEND") == "neo4j":
+                try:
+                    from neo4j import GraphDatabase
+                    neo4j_url = os.environ.get("NEO4J_URL", "neo4j://localhost:7687")
+                    neo4j_username = os.environ.get("NEO4J_USERNAME", "neo4j")
+                    neo4j_password = os.environ.get("NEO4J_PASSWORD", "neo4j")
+                    neo4j_database = os.environ.get("NEO4J_DATABASE", "neo4j")
+                    
+                    driver = GraphDatabase.driver(neo4j_url, auth=(neo4j_username, neo4j_password))
+                    with driver.session(database=neo4j_database) as session:
+                        # Delete all nodes and relationships
+                        result = session.run("MATCH (n) DETACH DELETE n")
+                        summary = result.consume()
+                        if summary.counters.nodes_deleted > 0:
+                            print(f"\n🧹 Cleaned up Neo4j: {summary.counters.nodes_deleted} nodes, {summary.counters.relationships_deleted} relationships")
+                    driver.close()
+                except Exception as e:
+                    print(f"Warning: Could not clean up Neo4j: {e}")
+            
+            # Clean up Qdrant if we're using it
+            if os.environ.get("STORAGE_VECTOR_BACKEND") == "qdrant":
+                try:
+                    from qdrant_client import QdrantClient
+                    
+                    qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+                    qdrant_api_key = os.environ.get("QDRANT_API_KEY", None)
+                    
+                    # Use synchronous client for cleanup to avoid event loop issues
+                    client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+                    
+                    # Get the namespace prefix
+                    namespace_prefix = os.environ.get("QDRANT_NAMESPACE_PREFIX")
+                    if not namespace_prefix:
+                        # Use working directory basename as prefix
+                        namespace_prefix = self.working_dir.name
+                    
+                    # Delete collections with our namespace prefix
+                    collections_to_delete = [
+                        f"{namespace_prefix}_entities",
+                        f"{namespace_prefix}_chunks"
+                    ]
+                    
+                    deleted_count = 0
+                    for collection_name in collections_to_delete:
+                        try:
+                            # Check if collection exists first
+                            collections = client.get_collections()
+                            if any(c.name == collection_name for c in collections.collections):
+                                client.delete_collection(collection_name)
+                                deleted_count += 1
+                        except Exception as e:
+                            print(f"Warning: Could not delete Qdrant collection {collection_name}: {e}")
+                    
+                    if deleted_count > 0:
+                        print(f"\n🧹 Cleaned up Qdrant: {deleted_count} collections deleted")
+                    
+                    client.close()
+                    
+                except Exception as e:
+                    print(f"Warning: Could not clean up Qdrant: {e}")
+            
             # Keep persistent directory by default
             self.cleanup(keep_persistent=True)
 
