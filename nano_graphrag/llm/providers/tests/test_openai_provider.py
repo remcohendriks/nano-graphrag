@@ -318,8 +318,8 @@ class TestOpenAIIntegration:
     )
     async def test_real_openai_completion(self):
         """Test with real OpenAI API (requires API key)."""
-        # Use test model from env or default to gpt-4o-mini
-        model = os.getenv("OPENAI_TEST_MODEL", "gpt-4o-mini")
+        # Use test model from env or default to gpt-5-mini
+        model = os.getenv("OPENAI_TEST_MODEL", "gpt-5-mini")
         provider = OpenAIProvider(model=model)
         
         result = await provider.complete(
@@ -338,7 +338,8 @@ class TestOpenAIIntegration:
     )
     async def test_real_openai_streaming(self):
         """Test streaming with real OpenAI API."""
-        model = "gpt-5-nano"  # Use gpt-5-nano for streaming (works unverified)
+        # Use environment variable for model, default to gpt-5-nano for unverified streaming
+        model = os.getenv("OPENAI_STREAMING_MODEL", "gpt-5-nano")
         provider = OpenAIProvider(model=model)
         
         chunks = []

@@ -17,11 +17,12 @@ async def mock_embedding_func(texts: List[str]) -> np.ndarray:
 
 @wrap_embedding_func_with_attrs(embedding_dim=128, max_token_size=8192)
 async def deterministic_embedding_func(texts: List[str]) -> np.ndarray:
-    """Semantic embeddings for testing - uses OpenAI if available, else keyword-based."""
+    """Semantic embeddings for testing - uses OpenAI only when explicitly enabled."""
     import os
 
-    # Try to use real OpenAI embeddings if API key is available
-    if os.getenv("OPENAI_API_KEY"):
+    # Only use OpenAI if explicitly enabled for testing AND API key is available
+    # This prevents unexpected API calls and costs
+    if os.getenv("USE_OPENAI_FOR_TESTS") == "1" and os.getenv("OPENAI_API_KEY"):
         try:
             from nano_graphrag.llm.providers.openai import OpenAIProvider, OpenAIEmbedder
 
@@ -33,8 +34,10 @@ async def deterministic_embedding_func(texts: List[str]) -> np.ndarray:
 
             response = await embedder.embed(texts)
             return np.array(response.embeddings)
-        except Exception:
-            # Fall back to keyword-based if OpenAI fails
+        except Exception as e:
+            # Log but fall back to keyword-based
+            import logging
+            logging.debug(f"OpenAI embedding failed, using fallback: {e}")
             pass
 
     # Fallback: Keyword-based semantic embeddings for predictable tests

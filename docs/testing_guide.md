@@ -114,11 +114,11 @@ pytest tests/storage/test_neo4j_basic.py -v
 pytest tests/storage/test_qdrant_storage.py -v
 
 # Run integration tests (requires services to be running)
-RUN_NEO4J_TESTS=1 pytest tests/storage/test_neo4j_basic.py::test_neo4j_connection -v
-RUN_QDRANT_TESTS=1 pytest tests/storage/test_qdrant_storage.py::TestQdrantIntegration -v
+RUN_NEO4J_TESTS=1 pytest tests/storage/integration/test_neo4j_integration.py -v
+RUN_QDRANT_TESTS=1 pytest tests/storage/integration/test_qdrant_integration.py -v
 
-# Run both Neo4j and Qdrant integration tests
-RUN_NEO4J_TESTS=1 RUN_QDRANT_TESTS=1 pytest tests/storage/ -k "integration or test_neo4j_connection" -v
+# Run all integration tests
+RUN_NEO4J_TESTS=1 RUN_QDRANT_TESTS=1 pytest tests/storage/integration/ -v
 
 # Run OpenAI integration tests (requires valid API key in .env)
 pytest nano_graphrag/llm/providers/tests/test_openai_provider.py::TestOpenAIIntegration -v
@@ -137,7 +137,9 @@ export RUN_QDRANT_TESTS=1
 
 # OpenAI API configuration (in .env file)
 OPENAI_API_KEY=sk-your-actual-api-key
-OPENAI_TEST_MODEL=gpt-5-mini  # Optional, defaults to gpt-5-mini
+OPENAI_TEST_MODEL=gpt-5-mini          # Optional, defaults to gpt-5-mini
+OPENAI_STREAMING_MODEL=gpt-5-nano     # Optional, for streaming tests
+USE_OPENAI_FOR_TESTS=1                # Optional, enables real embeddings in tests
 ```
 
 ### Neo4j Configuration

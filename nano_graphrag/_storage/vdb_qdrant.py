@@ -19,10 +19,14 @@ class QdrantVectorStorage(BaseVectorStorage):
         
         from qdrant_client import AsyncQdrantClient, models
         
-        # Get configuration
-        self._url = self.global_config.get("qdrant_url", "http://localhost:6333")
-        self._api_key = self.global_config.get("qdrant_api_key", None)
-        self._collection_params = self.global_config.get("qdrant_collection_params", {})
+        # Get configuration - check addon_params first, then top-level
+        addon_params = self.global_config.get("addon_params", {})
+        self._url = addon_params.get("qdrant_url",
+                                     self.global_config.get("qdrant_url", "http://localhost:6333"))
+        self._api_key = addon_params.get("qdrant_api_key",
+                                         self.global_config.get("qdrant_api_key", None))
+        self._collection_params = addon_params.get("qdrant_collection_params",
+                                                   self.global_config.get("qdrant_collection_params", {}))
         
         # Store models for later use (needed before client creation)
         self._models = models

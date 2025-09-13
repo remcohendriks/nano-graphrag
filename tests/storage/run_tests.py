@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Simple test runner for storage backend validation."""
 
+import pytest
 import sys
-import subprocess
+import os
 from pathlib import Path
 from typing import List, Tuple, Dict
 
@@ -50,29 +51,25 @@ def detect_available_backends() -> Dict[str, List[str]]:
 
 
 def run_test_suite(test_file: str, backend: str = None) -> bool:
-    """Run a specific test suite."""
+    """Run a specific test suite using pytest."""
     print(f"\n{'='*60}")
     print(f"Running: {test_file}")
     if backend:
         print(f"Backend: {backend}")
     print('='*60)
 
-    cmd = ["python", "-m", "pytest", test_file, "-xvs"]
-
+    # Use pytest.main directly instead of subprocess
+    args = ["-xvs", test_file]
     if backend:
-        cmd.extend(["--backend", backend])
+        args.extend(["--backend", backend])
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = pytest.main(args)
 
-    if result.returncode == 0:
+    if result == 0:
         print("✅ PASSED")
         return True
     else:
         print("❌ FAILED")
-        if result.stdout:
-            print("Output:", result.stdout[-500:])  # Last 500 chars
-        if result.stderr:
-            print("Errors:", result.stderr[-500:])
         return False
 
 
@@ -98,16 +95,15 @@ def run_contract_tests() -> Dict[str, List[Tuple[str, bool]]]:
 
     test_files = {
         "vector": {
-            "nano": "tests/test_hnsw_vector_storage.py",  # Note: HNSW test, not nano
-            "hnswlib": "tests/test_hnsw_vector_storage.py",
+            "hnswlib": "tests/storage/test_hnswlib_contract.py",
             "qdrant": "tests/storage/test_qdrant_storage.py"
         },
         "graph": {
-            "networkx": "tests/test_networkx_storage.py",
-            "neo4j": "tests/test_neo4j_storage.py"
+            "networkx": "tests/storage/test_networkx_contract.py",
+            "neo4j": "tests/storage/test_neo4j_basic.py"
         },
         "kv": {
-            "json": None  # No specific test yet
+            "json": "tests/storage/test_json_kv_contract.py"
         }
     }
 
@@ -121,18 +117,26 @@ def run_contract_tests() -> Dict[str, List[Tuple[str, bool]]]:
             else:
                 print(f"\nNo test file for {backend} {storage_type} storage")
 
-    # Run integration tests if services available
+    # Run integration tests if explicitly enabled
     print("\n" + "="*60)
     print("RUNNING INTEGRATION TESTS")
     print("="*60)
 
-    if "neo4j" in backends["graph"]:
-        success = run_test_suite("tests/storage/integration/test_neo4j_integration.py")
-        results["graph"].append(("neo4j_integration", success))
+    if os.environ.get("RUN_NEO4J_TESTS") and "neo4j" in backends["graph"]:
+        test_file = "tests/storage/integration/test_neo4j_integration.py"
+        if Path(test_file).exists():
+            success = run_test_suite(test_file)
+            results["graph"].append(("neo4j_integration", success))
+        else:
+            print(f"Integration test file not found: {test_file}")
 
-    if "qdrant" in backends["vector"]:
-        success = run_test_suite("tests/storage/integration/test_qdrant_integration.py")
-        results["vector"].append(("qdrant_integration", success))
+    if os.environ.get("RUN_QDRANT_TESTS") and "qdrant" in backends["vector"]:
+        test_file = "tests/storage/integration/test_qdrant_integration.py"
+        if Path(test_file).exists():
+            success = run_test_suite(test_file)
+            results["vector"].append(("qdrant_integration", success))
+        else:
+            print(f"Integration test file not found: {test_file}")
 
     return results
 

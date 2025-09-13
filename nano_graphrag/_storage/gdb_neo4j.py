@@ -151,7 +151,7 @@ class Neo4jStorage(BaseGraphStorage):
                 # Create uniqueness constraint (also creates index)
                 if ("id",) not in existing_constraints:
                     await tx.run(
-                        f"CREATE CONSTRAINT "
+                        f"CREATE CONSTRAINT IF NOT EXISTS "
                         f"FOR (n:`{self.namespace}`) "
                         f"REQUIRE n.id IS UNIQUE"
                     )
@@ -177,7 +177,7 @@ class Neo4jStorage(BaseGraphStorage):
                     if index_props not in existing_indexes and index_props != ("id",):
                         prop_name = index_props[0]
                         await tx.run(
-                            f"CREATE INDEX "
+                            f"CREATE INDEX IF NOT EXISTS "
                             f"FOR (n:`{self.namespace}`) "
                             f"ON (n.{prop_name})"
                         )
@@ -186,7 +186,13 @@ class Neo4jStorage(BaseGraphStorage):
             try:
                 await session.execute_write(create_constraints)
             except Exception as e:
-                logger.warning(f"Constraint/index creation warning: {e}")
+                # Only suppress already-exists errors, re-raise others
+                error_msg = str(e).lower()
+                if "already exists" in error_msg or "equivalent constraint already exists" in error_msg:
+                    logger.debug(f"Constraint/index already exists (expected): {e}")
+                else:
+                    logger.error(f"Failed to create constraints/indexes: {e}")
+                    raise
 
     async def _init_workspace(self):
         await self.async_driver.verify_authentication()
@@ -385,11 +391,9 @@ class Neo4jStorage(BaseGraphStorage):
                     target_id = record["target_id"]
                     edge_data = record["edge_data"]
 
-                    # Convert numeric values back to strings for compatibility
-                    if edge_data:
-                        for key, value in edge_data.items():
-                            if isinstance(value, (int, float)):
-                                edge_data[key] = str(value)
+                    # Keep numeric types as-is for consistency
+                    # Note: If specific consumers need string conversion,
+                    # they should handle it at their boundary
 
                     edge_pair = (source_id, target_id)
                     result_dict[edge_pair] = edge_data
