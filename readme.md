@@ -402,6 +402,29 @@ See [ROADMAP.md](./docs/ROADMAP.md)
 
 ## Contribute
 
+## Testing
+
+### Running Tests
+
+```bash
+# Run all unit tests
+pytest tests/ -v
+
+# Run storage backend tests
+pytest tests/storage/ -v
+
+# Run integration tests (requires services)
+RUN_NEO4J_TESTS=1 RUN_QDRANT_TESTS=1 pytest tests/storage/ -k "integration or test_neo4j_connection" -v
+```
+
+### Integration Test Requirements
+
+- **Neo4j**: Must be running on `localhost:7687` with credentials `neo4j/your-secure-password-change-me`
+- **Qdrant**: Must be running on `localhost:6333`
+- **OpenAI**: Requires valid API key in `.env` file
+
+See [testing guide](./docs/testing_guide.md) for detailed testing documentation.
+
 `nano-graphrag` is open to any kind of contribution. Read [this](./docs/CONTRIBUTING.md) before you contribute.
 
 

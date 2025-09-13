@@ -370,11 +370,14 @@ async def summarize_community(
     # Try to parse as JSON, otherwise use as text
     try:
         report_data = to_json_func(response)
+        # Check if parsing returned empty dict (failed parsing)
+        if not report_data:
+            raise ValueError("Empty JSON result")
     except:
         report_data = {
             "summary": response[:max_tokens],
             "entities": [n.get("name", n.get("id")) for n in nodes_data],
             "relationships": len(edges_data)
         }
-    
+
     return report_data

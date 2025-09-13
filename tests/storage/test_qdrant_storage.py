@@ -1,5 +1,6 @@
 """Tests for Qdrant vector storage."""
 
+import os
 import pytest
 import asyncio
 import xxhash
@@ -34,23 +35,33 @@ class TestQdrantStorage:
     async def test_initialization(self, mock_embedding_func, mock_global_config):
         """Test QdrantVectorStorage initialization."""
         with patch("nano_graphrag._storage.vdb_qdrant.ensure_dependency"):
-            with patch("qdrant_client.AsyncQdrantClient") as mock_client:
+            with patch("qdrant_client.AsyncQdrantClient") as mock_client_class:
                 from nano_graphrag._storage.vdb_qdrant import QdrantVectorStorage
-                
+
                 storage = QdrantVectorStorage(
                     namespace="test",
                     global_config=mock_global_config,
                     embedding_func=mock_embedding_func
                 )
-                
-                # Check client was created with correct params
-                mock_client.assert_called_once_with(
+
+                # Client should not be created yet (lazy initialization)
+                mock_client_class.assert_not_called()
+
+                assert storage.namespace == "test"
+                assert storage._collection_initialized == False
+                assert storage._client is None
+
+                # Now trigger client creation
+                mock_client = AsyncMock()
+                mock_client_class.return_value = mock_client
+                client = await storage._get_client()
+
+                # Now check client was created with correct params
+                mock_client_class.assert_called_once_with(
                     url="http://localhost:6333",
                     api_key=None
                 )
-                
-                assert storage.namespace == "test"
-                assert storage._collection_initialized == False
+                assert client == mock_client
     
     @pytest.mark.asyncio
     async def test_ensure_collection_creates_if_not_exists(self, mock_embedding_func, mock_global_config):
@@ -86,8 +97,8 @@ class TestQdrantStorage:
     @pytest.mark.asyncio
     async def test_upsert_with_content(self, mock_embedding_func, mock_global_config):
         """Test upserting data with content field."""
-        with patch("nano_graphrag._storage.vdb_qdrant.AsyncQdrantClient") as mock_client_class:
-            with patch("nano_graphrag._storage.vdb_qdrant.ensure_dependency"):
+        with patch("nano_graphrag._storage.vdb_qdrant.ensure_dependency"):
+            with patch("qdrant_client.AsyncQdrantClient") as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client_class.return_value = mock_client
                 
@@ -96,7 +107,7 @@ class TestQdrantStorage:
                 mock_collections.collections = [Mock(name="test")]
                 mock_client.get_collections.return_value = mock_collections
                 
-                with patch("nano_graphrag._storage.vdb_qdrant.models") as mock_models:
+                with patch("qdrant_client.models") as mock_models:
                     mock_point_struct = Mock()
                     mock_models.PointStruct = mock_point_struct
                     
@@ -137,8 +148,8 @@ class TestQdrantStorage:
     @pytest.mark.asyncio
     async def test_query_returns_formatted_results(self, mock_embedding_func, mock_global_config):
         """Test query returns properly formatted results."""
-        with patch("nano_graphrag._storage.vdb_qdrant.AsyncQdrantClient") as mock_client_class:
-            with patch("nano_graphrag._storage.vdb_qdrant.ensure_dependency"):
+        with patch("nano_graphrag._storage.vdb_qdrant.ensure_dependency"):
+            with patch("qdrant_client.AsyncQdrantClient") as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client_class.return_value = mock_client
                 
@@ -147,15 +158,18 @@ class TestQdrantStorage:
                 mock_collections.collections = [Mock(name="test")]
                 mock_client.get_collections.return_value = mock_collections
                 
-                # Mock search results
+                # Mock query_points results
+                mock_response = Mock()
                 mock_hit = Mock()
                 mock_hit.score = 0.95
                 mock_hit.payload = {
+                    "id": "test_id",
                     "content": "Result content",
                     "entity_name": "test_entity",
                     "custom_field": "custom_value"
                 }
-                mock_client.search.return_value = [mock_hit]
+                mock_response.points = [mock_hit]
+                mock_client.query_points.return_value = mock_response
                 
                 from nano_graphrag._storage.vdb_qdrant import QdrantVectorStorage
                 
@@ -167,11 +181,11 @@ class TestQdrantStorage:
                 
                 results = await storage.query("test query", top_k=5)
                 
-                # Check search was called
-                mock_client.search.assert_called_once()
-                search_args = mock_client.search.call_args
-                assert search_args.kwargs["collection_name"] == "test"
-                assert search_args.kwargs["limit"] == 5
+                # Check query_points was called
+                mock_client.query_points.assert_called_once()
+                query_args = mock_client.query_points.call_args
+                assert query_args.kwargs["collection_name"] == "test"
+                assert query_args.kwargs["limit"] == 5
                 
                 # Check result format
                 assert len(results) == 1
@@ -183,8 +197,8 @@ class TestQdrantStorage:
     @pytest.mark.asyncio
     async def test_empty_upsert(self, mock_embedding_func, mock_global_config):
         """Test handling of empty data in upsert."""
-        with patch("nano_graphrag._storage.vdb_qdrant.AsyncQdrantClient") as mock_client_class:
-            with patch("nano_graphrag._storage.vdb_qdrant.ensure_dependency"):
+        with patch("nano_graphrag._storage.vdb_qdrant.ensure_dependency"):
+            with patch("qdrant_client.AsyncQdrantClient") as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client_class.return_value = mock_client
                 
@@ -205,8 +219,8 @@ class TestQdrantStorage:
     @pytest.mark.asyncio
     async def test_context_manager(self, mock_embedding_func, mock_global_config):
         """Test async context manager functionality."""
-        with patch("nano_graphrag._storage.vdb_qdrant.AsyncQdrantClient") as mock_client_class:
-            with patch("nano_graphrag._storage.vdb_qdrant.ensure_dependency"):
+        with patch("nano_graphrag._storage.vdb_qdrant.ensure_dependency"):
+            with patch("qdrant_client.AsyncQdrantClient") as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client_class.return_value = mock_client
                 
@@ -218,7 +232,9 @@ class TestQdrantStorage:
                     embedding_func=mock_embedding_func
                 ) as storage:
                     assert storage is not None
-                
+                    # Trigger client creation to test cleanup
+                    await storage._get_client()
+
                 # Check client.close was called on exit
                 mock_client.close.assert_called_once()
 
@@ -228,9 +244,12 @@ class TestQdrantIntegration:
     """Integration tests with real Qdrant instance."""
     
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Integration tests require running Qdrant instance")
     async def test_end_to_end_with_docker_qdrant(self):
         """Test end-to-end with Docker Qdrant instance."""
+        # Skip if Qdrant tests are not enabled
+        if not os.getenv("RUN_QDRANT_TESTS"):
+            pytest.skip("Qdrant integration tests disabled (set RUN_QDRANT_TESTS=1 to enable)")
+
         try:
             from qdrant_client import AsyncQdrantClient
             from nano_graphrag._storage.vdb_qdrant import QdrantVectorStorage

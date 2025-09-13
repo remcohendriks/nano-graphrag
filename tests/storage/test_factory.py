@@ -65,14 +65,15 @@ class TestStorageFactory:
     
     def test_create_vector_storage(self):
         """Verify factory creates correct vector storage instance."""
-        mock_backend = MagicMock()
+        mock_class = MagicMock()
         mock_instance = Mock()
-        mock_backend.return_value = mock_instance
-        StorageFactory.register_vector("nano", mock_backend)
-        
+        mock_class.return_value = mock_instance
+        mock_loader = Mock(return_value=mock_class)
+        StorageFactory.register_vector("nano", mock_loader)
+
         embedding_func = Mock()
         global_config = {"working_dir": "/tmp"}
-        
+
         storage = StorageFactory.create_vector_storage(
             backend="nano",
             namespace="test",
@@ -80,9 +81,10 @@ class TestStorageFactory:
             embedding_func=embedding_func,
             custom_param="value"
         )
-        
+
         assert storage == mock_instance
-        mock_backend.assert_called_once_with(
+        mock_loader.assert_called_once_with()
+        mock_class.assert_called_once_with(
             namespace="test",
             global_config=global_config,
             embedding_func=embedding_func,
@@ -91,15 +93,16 @@ class TestStorageFactory:
     
     def test_create_vector_storage_with_meta_fields(self):
         """Verify vector storage creation with meta_fields."""
-        mock_backend = MagicMock()
+        mock_class = MagicMock()
         mock_instance = Mock()
-        mock_backend.return_value = mock_instance
-        StorageFactory.register_vector("nano", mock_backend)
-        
+        mock_class.return_value = mock_instance
+        mock_loader = Mock(return_value=mock_class)
+        StorageFactory.register_vector("nano", mock_loader)
+
         embedding_func = Mock()
         global_config = {"working_dir": "/tmp"}
         meta_fields = {"entity_name", "entity_type"}
-        
+
         storage = StorageFactory.create_vector_storage(
             backend="nano",
             namespace="test",
@@ -107,9 +110,10 @@ class TestStorageFactory:
             embedding_func=embedding_func,
             meta_fields=meta_fields
         )
-        
+
         assert storage == mock_instance
-        mock_backend.assert_called_once_with(
+        mock_loader.assert_called_once_with()
+        mock_class.assert_called_once_with(
             namespace="test",
             global_config=global_config,
             embedding_func=embedding_func,
@@ -118,11 +122,12 @@ class TestStorageFactory:
     
     def test_create_vector_storage_hnsw_kwargs(self):
         """Verify HNSW backend receives vector_db_storage_cls_kwargs."""
-        mock_backend = MagicMock()
+        mock_class = MagicMock()
         mock_instance = Mock()
-        mock_backend.return_value = mock_instance
-        StorageFactory.register_vector("hnswlib", mock_backend)
-        
+        mock_class.return_value = mock_instance
+        mock_loader = Mock(return_value=mock_class)
+        StorageFactory.register_vector("hnswlib", mock_loader)
+
         embedding_func = Mock()
         global_config = {
             "working_dir": "/tmp",
@@ -133,16 +138,17 @@ class TestStorageFactory:
                 "max_elements": 2000000
             }
         }
-        
+
         storage = StorageFactory.create_vector_storage(
             backend="hnswlib",
             namespace="test",
             global_config=global_config,
             embedding_func=embedding_func
         )
-        
+
         assert storage == mock_instance
-        mock_backend.assert_called_once_with(
+        mock_loader.assert_called_once_with()
+        mock_class.assert_called_once_with(
             namespace="test",
             global_config=global_config,
             embedding_func=embedding_func,
@@ -164,22 +170,24 @@ class TestStorageFactory:
     
     def test_create_graph_storage(self):
         """Verify factory creates correct graph storage instance."""
-        mock_backend = MagicMock()
+        mock_class = MagicMock()
         mock_instance = Mock()
-        mock_backend.return_value = mock_instance
-        StorageFactory.register_graph("networkx", mock_backend)
-        
+        mock_class.return_value = mock_instance
+        mock_loader = Mock(return_value=mock_class)
+        StorageFactory.register_graph("networkx", mock_loader)
+
         global_config = {"working_dir": "/tmp"}
-        
+
         storage = StorageFactory.create_graph_storage(
             backend="networkx",
             namespace="test",
             global_config=global_config,
             custom_param="value"
         )
-        
+
         assert storage == mock_instance
-        mock_backend.assert_called_once_with(
+        mock_loader.assert_called_once_with()
+        mock_class.assert_called_once_with(
             namespace="test",
             global_config=global_config,
             custom_param="value"
@@ -196,22 +204,24 @@ class TestStorageFactory:
     
     def test_create_kv_storage(self):
         """Verify factory creates correct KV storage instance."""
-        mock_backend = MagicMock()
+        mock_class = MagicMock()
         mock_instance = Mock()
-        mock_backend.return_value = mock_instance
-        StorageFactory.register_kv("json", mock_backend)
-        
+        mock_class.return_value = mock_instance
+        mock_loader = Mock(return_value=mock_class)
+        StorageFactory.register_kv("json", mock_loader)
+
         global_config = {"working_dir": "/tmp"}
-        
+
         storage = StorageFactory.create_kv_storage(
             backend="json",
             namespace="test",
             global_config=global_config,
             custom_param="value"
         )
-        
+
         assert storage == mock_instance
-        mock_backend.assert_called_once_with(
+        mock_loader.assert_called_once_with()
+        mock_class.assert_called_once_with(
             namespace="test",
             global_config=global_config,
             custom_param="value"
@@ -234,8 +244,8 @@ class TestStorageFactory:
         # First call should register backends
         _register_backends()
         
-        assert mock_vector.call_count == 2  # nano and hnswlib
-        assert mock_graph.call_count == 1   # networkx
+        assert mock_vector.call_count == 3  # nano, hnswlib, and qdrant
+        assert mock_graph.call_count == 2   # networkx and neo4j
         assert mock_kv.call_count == 1      # json
         
         # Reset mocks
@@ -244,8 +254,8 @@ class TestStorageFactory:
         mock_kv.reset_mock()
         
         # Set backends as already registered
-        StorageFactory._vector_backends = {"nano": Mock(), "hnswlib": Mock()}
-        StorageFactory._graph_backends = {"networkx": Mock()}
+        StorageFactory._vector_backends = {"nano": Mock(), "hnswlib": Mock(), "qdrant": Mock()}
+        StorageFactory._graph_backends = {"networkx": Mock(), "neo4j": Mock()}
         StorageFactory._kv_backends = {"json": Mock()}
         
         # Second call should not re-register
@@ -277,6 +287,7 @@ class TestStorageFactory:
                 # Should have registered backends
                 assert "nano" in StorageFactory._vector_backends
                 assert "hnswlib" in StorageFactory._vector_backends
+                assert "qdrant" in StorageFactory._vector_backends
 
 
 class TestStorageFactoryIntegration:
