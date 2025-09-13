@@ -1,16 +1,14 @@
 # NGRAF-013: Unified Storage Testing Framework
 
 ## Overview
-Create a comprehensive testing framework that ensures all storage backends (vector, graph, KV) conform to their interfaces, provides performance benchmarking, enables compatibility testing between backends, and validates examples automatically.
+Create a standardized testing framework that ensures all storage backends (vector, graph, KV) conform to their interfaces through contract-based testing and validates examples automatically.
 
 ## Current State
 - Storage tests are scattered across different files with inconsistent patterns
 - No standard way to validate new storage implementations
-- No performance benchmarking framework
-- No automated compatibility testing between backends
-- Examples in `examples/` directory not validated in CI
+- Examples in `examples/` directory not validated automatically
 - Each storage has its own test style and coverage levels
-- No way to test storage migrations or data portability
+- No contract-based testing to ensure interface compliance
 
 ## Proposed Implementation
 
@@ -482,376 +480,178 @@ class BaseGraphStorageTestSuite(ABC):
         assert len(edges) == 19  # Linear chain
 ```
 
-### Phase 2: Performance Benchmarking Framework
+### Phase 2: KV Storage Test Suite
 
-#### Create `tests/storage/base/performance.py`
+#### Create `tests/storage/base/kv_suite.py`
 ```python
-"""Performance benchmarking for storage backends."""
+"""Base test suite for key-value storage implementations."""
 
-import time
-import asyncio
-import numpy as np
-from typing import Dict, Any, List
-from dataclasses import dataclass
 import pytest
-import matplotlib.pyplot as plt
-from pathlib import Path
+import asyncio
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
 
 @dataclass
-class BenchmarkResult:
-    """Result of a benchmark run."""
-    
-    operation: str
-    backend: str
-    dataset_size: int
-    duration: float
-    operations_per_second: float
-    memory_usage_mb: float
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "operation": self.operation,
-            "backend": self.backend,
-            "dataset_size": self.dataset_size,
-            "duration": self.duration,
-            "ops_per_sec": self.operations_per_second,
-            "memory_mb": self.memory_usage_mb
-        }
+class KVStorageContract:
+    """Contract that all KV storages must fulfill."""
 
-class StoragePerformanceTestSuite:
-    """Performance benchmarking suite for storage backends."""
-    
-    DATASET_SIZES = [100, 1000, 10000, 100000]
-    
+    supports_batch_ops: bool = True
+    supports_persistence: bool = True
+    supports_async: bool = True
+    supports_namespace: bool = True
+    max_key_length: Optional[int] = None
+    max_value_size: Optional[int] = None
+
+class BaseKVStorageTestSuite(ABC):
+    """Abstract test suite all KV storage implementations must pass."""
+
     @pytest.fixture
-    def benchmark_dir(self, tmp_path):
-        """Directory for benchmark results."""
-        benchmark_path = tmp_path / "benchmarks"
-        benchmark_path.mkdir()
-        return benchmark_path
-    
-    async def benchmark_vector_storage(
-        self,
-        storage,
-        dataset_size: int,
-        dimension: int = 128
-    ) -> Dict[str, BenchmarkResult]:
-        """Benchmark vector storage operations."""
-        results = {}
-        backend_name = type(storage).__name__
-        
-        # Generate test data
-        data = {}
-        for i in range(dataset_size):
-            data[f"content_{i}"] = {
-                "embedding": np.random.rand(dimension).tolist(),
-                "metadata": {"index": i}
-            }
-        
-        # Benchmark upsert
-        start = time.time()
-        await storage.upsert(data)
-        upsert_duration = time.time() - start
-        
-        results["upsert"] = BenchmarkResult(
-            operation="upsert",
-            backend=backend_name,
-            dataset_size=dataset_size,
-            duration=upsert_duration,
-            operations_per_second=dataset_size / upsert_duration,
-            memory_usage_mb=self._get_memory_usage()
-        )
-        
-        # Benchmark queries
-        query_times = []
-        for _ in range(100):
-            start = time.time()
-            await storage.query(f"content_{np.random.randint(dataset_size)}", top_k=10)
-            query_times.append(time.time() - start)
-        
-        avg_query_time = np.mean(query_times)
-        results["query"] = BenchmarkResult(
-            operation="query",
-            backend=backend_name,
-            dataset_size=dataset_size,
-            duration=avg_query_time,
-            operations_per_second=1 / avg_query_time,
-            memory_usage_mb=self._get_memory_usage()
-        )
-        
-        return results
-    
-    async def benchmark_graph_storage(
-        self,
-        storage,
-        num_nodes: int,
-        edge_factor: int = 3
-    ) -> Dict[str, BenchmarkResult]:
-        """Benchmark graph storage operations."""
-        results = {}
-        backend_name = type(storage).__name__
-        num_edges = num_nodes * edge_factor
-        
-        # Benchmark node insertion
-        start = time.time()
-        for i in range(num_nodes):
-            await storage.upsert_node(f"node_{i}", {"index": i})
-        node_duration = time.time() - start
-        
-        results["node_insert"] = BenchmarkResult(
-            operation="node_insert",
-            backend=backend_name,
-            dataset_size=num_nodes,
-            duration=node_duration,
-            operations_per_second=num_nodes / node_duration,
-            memory_usage_mb=self._get_memory_usage()
-        )
-        
-        # Benchmark edge insertion
-        start = time.time()
-        for i in range(num_edges):
-            source = f"node_{np.random.randint(num_nodes)}"
-            target = f"node_{np.random.randint(num_nodes)}"
-            await storage.upsert_edge(source, target, {"weight": np.random.rand()})
-        edge_duration = time.time() - start
-        
-        results["edge_insert"] = BenchmarkResult(
-            operation="edge_insert",
-            backend=backend_name,
-            dataset_size=num_edges,
-            duration=edge_duration,
-            operations_per_second=num_edges / edge_duration,
-            memory_usage_mb=self._get_memory_usage()
-        )
-        
-        # Benchmark clustering
-        if hasattr(storage, 'clustering'):
-            start = time.time()
-            await storage.clustering("leiden")
-            clustering_duration = time.time() - start
-            
-            results["clustering"] = BenchmarkResult(
-                operation="clustering",
-                backend=backend_name,
-                dataset_size=num_nodes,
-                duration=clustering_duration,
-                operations_per_second=1 / clustering_duration,
-                memory_usage_mb=self._get_memory_usage()
-            )
-        
-        return results
-    
-    def _get_memory_usage(self) -> float:
-        """Get current memory usage in MB."""
-        import psutil
-        process = psutil.Process()
-        return process.memory_info().rss / 1024 / 1024
-    
-    def plot_results(
-        self,
-        results: List[BenchmarkResult],
-        output_dir: Path
-    ):
-        """Generate performance comparison plots."""
-        # Group by operation
-        operations = {}
-        for result in results:
-            if result.operation not in operations:
-                operations[result.operation] = []
-            operations[result.operation].append(result)
-        
-        # Create plots
-        for operation, op_results in operations.items():
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-            
-            # Group by backend
-            backends = {}
-            for r in op_results:
-                if r.backend not in backends:
-                    backends[r.backend] = {"sizes": [], "times": [], "ops": []}
-                backends[r.backend]["sizes"].append(r.dataset_size)
-                backends[r.backend]["times"].append(r.duration)
-                backends[r.backend]["ops"].append(r.operations_per_second)
-            
-            # Plot duration
-            for backend, data in backends.items():
-                ax1.plot(data["sizes"], data["times"], marker='o', label=backend)
-            ax1.set_xlabel("Dataset Size")
-            ax1.set_ylabel("Duration (seconds)")
-            ax1.set_title(f"{operation} - Duration")
-            ax1.set_xscale('log')
-            ax1.set_yscale('log')
-            ax1.legend()
-            ax1.grid(True, alpha=0.3)
-            
-            # Plot throughput
-            for backend, data in backends.items():
-                ax2.plot(data["sizes"], data["ops"], marker='o', label=backend)
-            ax2.set_xlabel("Dataset Size")
-            ax2.set_ylabel("Operations/Second")
-            ax2.set_title(f"{operation} - Throughput")
-            ax2.set_xscale('log')
-            ax2.set_yscale('log')
-            ax2.legend()
-            ax2.grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            plt.savefig(output_dir / f"benchmark_{operation}.png")
-            plt.close()
-    
-    def generate_report(
-        self,
-        results: List[BenchmarkResult],
-        output_file: Path
-    ):
-        """Generate markdown benchmark report."""
-        with open(output_file, 'w') as f:
-            f.write("# Storage Backend Performance Report\n\n")
-            
-            # Group by operation
-            operations = {}
-            for result in results:
-                if result.operation not in operations:
-                    operations[result.operation] = []
-                operations[result.operation].append(result)
-            
-            for operation, op_results in operations.items():
-                f.write(f"## {operation}\n\n")
-                f.write("| Backend | Dataset Size | Duration (s) | Ops/sec | Memory (MB) |\n")
-                f.write("|---------|--------------|--------------|---------|-------------|\n")
-                
-                for r in sorted(op_results, key=lambda x: (x.backend, x.dataset_size)):
-                    f.write(f"| {r.backend} | {r.dataset_size:,} | "
-                           f"{r.duration:.3f} | {r.operations_per_second:.1f} | "
-                           f"{r.memory_usage_mb:.1f} |\n")
-                
-                f.write("\n")
+    @abstractmethod
+    async def storage(self) -> Any:
+        """Provide storage instance for testing."""
+        pass
+
+    @pytest.fixture
+    @abstractmethod
+    def contract(self) -> KVStorageContract:
+        """Define storage capabilities contract."""
+        pass
+
+    @pytest.mark.asyncio
+    async def test_basic_operations(self, storage):
+        """Test basic get/set operations."""
+        # Set single item
+        await storage.upsert({"key1": {"value": "data1", "metadata": "test"}})
+
+        # Get single item
+        result = await storage.get_by_id("key1")
+        assert result is not None
+        assert result["value"] == "data1"
+        assert result["metadata"] == "test"
+
+        # Get non-existent item
+        result = await storage.get_by_id("nonexistent")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_batch_operations(self, storage, contract):
+        """Test batch operations."""
+        if not contract.supports_batch_ops:
+            pytest.skip("Storage doesn't support batch operations")
+
+        # Batch upsert
+        batch_data = {
+            f"key_{i}": {"value": f"data_{i}", "index": i}
+            for i in range(100)
+        }
+        await storage.upsert(batch_data)
+
+        # Batch get
+        keys = [f"key_{i}" for i in range(50)]
+        results = await storage.get_by_ids(keys)
+
+        assert len(results) == 50
+        for i, result in enumerate(results):
+            assert result["value"] == f"data_{i}"
+            assert result["index"] == i
+
+    @pytest.mark.asyncio
+    async def test_filter_keys(self, storage):
+        """Test filtering existing keys."""
+        # Insert some data
+        await storage.upsert({
+            "existing1": {"value": "data1"},
+            "existing2": {"value": "data2"},
+            "existing3": {"value": "data3"}
+        })
+
+        # Filter keys
+        test_keys = ["existing1", "existing2", "new1", "new2"]
+        new_keys = await storage.filter_keys(test_keys)
+
+        assert "new1" in new_keys
+        assert "new2" in new_keys
+        assert "existing1" not in new_keys
+        assert "existing2" not in new_keys
+
+    @pytest.mark.asyncio
+    async def test_all_keys(self, storage):
+        """Test listing all keys."""
+        # Insert test data
+        test_data = {f"key_{i}": {"value": f"data_{i}"} for i in range(10)}
+        await storage.upsert(test_data)
+
+        # Get all keys
+        all_keys = await storage.all_keys()
+
+        for i in range(10):
+            assert f"key_{i}" in all_keys
+
+    @pytest.mark.asyncio
+    async def test_persistence(self, storage, contract):
+        """Test data persistence."""
+        if not contract.supports_persistence:
+            pytest.skip("Storage doesn't support persistence")
+
+        # Insert data
+        await storage.upsert({"persist_key": {"value": "persistent_data"}})
+
+        # Trigger persistence
+        if hasattr(storage, 'index_done_callback'):
+            await storage.index_done_callback()
+
+        # Verify data exists
+        result = await storage.get_by_id("persist_key")
+        assert result["value"] == "persistent_data"
+
+    @pytest.mark.asyncio
+    async def test_drop(self, storage):
+        """Test dropping all data."""
+        # Insert data
+        await storage.upsert({f"key_{i}": {"value": f"data_{i}"} for i in range(10)})
+
+        # Drop all data
+        await storage.drop()
+
+        # Verify empty
+        all_keys = await storage.all_keys()
+        assert len(all_keys) == 0
+
+    @pytest.mark.asyncio
+    async def test_concurrent_access(self, storage):
+        """Test concurrent read/write operations."""
+        async def write_task(index):
+            await storage.upsert({f"concurrent_{index}": {"value": f"data_{index}"}})
+
+        async def read_task(index):
+            return await storage.get_by_id(f"concurrent_{index}")
+
+        # Concurrent writes
+        write_tasks = [write_task(i) for i in range(20)]
+        await asyncio.gather(*write_tasks)
+
+        # Concurrent reads
+        read_tasks = [read_task(i) for i in range(20)]
+        results = await asyncio.gather(*read_tasks)
+
+        # Verify all successful
+        for i, result in enumerate(results):
+            if result is not None:  # May be None if read before write
+                assert result["value"] == f"data_{i}"
+
+    @pytest.mark.asyncio
+    async def test_graphrag_namespaces(self, storage):
+        """Test GraphRAG-specific namespace handling."""
+        # Test standard namespaces
+        namespaces = ["full_docs", "text_chunks", "community_reports", "llm_response_cache"]
+
+        for namespace in namespaces:
+            # Verify namespace is handled correctly
+            assert storage.namespace in namespaces or storage.namespace == "test"
 ```
 
-### Phase 3: Compatibility Testing
-
-#### Create `tests/storage/base/compatibility.py`
-```python
-"""Compatibility testing between storage backends."""
-
-import pytest
-import json
-from typing import Any, Dict, List
-import tempfile
-from pathlib import Path
-
-class StorageCompatibilityTestSuite:
-    """Test data portability between storage backends."""
-    
-    @pytest.fixture
-    def test_dataset(self) -> Dict[str, Any]:
-        """Standard test dataset for compatibility testing."""
-        return {
-            "vectors": {
-                "vec1": {"embedding": [0.1] * 128, "metadata": {"type": "A"}},
-                "vec2": {"embedding": [0.2] * 128, "metadata": {"type": "B"}},
-                "vec3": {"embedding": [0.3] * 128, "metadata": {"type": "A"}}
-            },
-            "nodes": {
-                "node1": {"type": "Person", "name": "Alice"},
-                "node2": {"type": "Person", "name": "Bob"},
-                "node3": {"type": "Organization", "name": "ACME"}
-            },
-            "edges": [
-                ("node1", "node2", {"relation": "knows"}),
-                ("node1", "node3", {"relation": "works_at"}),
-                ("node2", "node3", {"relation": "works_at"})
-            ],
-            "kv_data": {
-                "key1": {"value": "data1"},
-                "key2": {"value": "data2"},
-                "key3": {"value": "data3"}
-            }
-        }
-    
-    async def test_vector_storage_migration(
-        self,
-        source_storage,
-        target_storage,
-        test_dataset
-    ):
-        """Test migrating data between vector storage backends."""
-        # Insert into source
-        await source_storage.upsert(test_dataset["vectors"])
-        
-        # Export from source
-        all_data = {}
-        for content in test_dataset["vectors"].keys():
-            results = await source_storage.query(content, top_k=1)
-            if results:
-                all_data[content] = {
-                    "embedding": test_dataset["vectors"][content]["embedding"],
-                    **results[0]
-                }
-        
-        # Import to target
-        await target_storage.upsert(all_data)
-        
-        # Verify in target
-        for content in test_dataset["vectors"].keys():
-            results = await target_storage.query(content, top_k=1)
-            assert len(results) > 0
-            assert results[0].get("metadata", {}).get("type") == \
-                   test_dataset["vectors"][content]["metadata"]["type"]
-    
-    async def test_graph_storage_migration(
-        self,
-        source_storage,
-        target_storage,
-        test_dataset
-    ):
-        """Test migrating graph data between backends."""
-        # Insert into source
-        for node_id, node_data in test_dataset["nodes"].items():
-            await source_storage.upsert_node(node_id, node_data)
-        
-        for source, target, edge_data in test_dataset["edges"]:
-            await source_storage.upsert_edge(source, target, edge_data)
-        
-        # Export from source
-        nodes = await source_storage.get_nodes()
-        edges = await source_storage.get_edges()
-        
-        # Import to target
-        for node_id, node_data in nodes:
-            await target_storage.upsert_node(node_id, node_data)
-        
-        for source, target, edge_data in edges:
-            await target_storage.upsert_edge(source, target, edge_data)
-        
-        # Verify in target
-        target_nodes = await target_storage.get_nodes()
-        target_edges = await target_storage.get_edges()
-        
-        assert len(target_nodes) == len(nodes)
-        assert len(target_edges) == len(edges)
-    
-    def test_serialization_compatibility(self, test_dataset):
-        """Test that all backends can serialize/deserialize consistently."""
-        # Create common serialization format
-        serialized = {
-            "version": "1.0",
-            "vectors": test_dataset["vectors"],
-            "graph": {
-                "nodes": test_dataset["nodes"],
-                "edges": test_dataset["edges"]
-            },
-            "kv": test_dataset["kv_data"]
-        }
-        
-        # Ensure JSON serializable
-        json_str = json.dumps(serialized)
-        deserialized = json.loads(json_str)
-        
-        assert deserialized == serialized
-```
-
-### Phase 4: Example Validation Framework
+### Phase 3: Example Validation Framework
 
 #### Create `tests/examples/test_examples.py`
 ```python
@@ -947,119 +747,98 @@ class TestExamples:
                 )
 ```
 
-### Phase 5: CI/CD Integration
+### Phase 3: Simple Test Runner
 
-#### Create `.github/workflows/storage-tests.yml`
-```yaml
-name: Storage Backend Tests
+#### Create `tests/storage/run_storage_tests.py`
+```python
+"""Simple test runner for storage backend validation."""
 
-on:
-  push:
-    paths:
-      - 'nano_graphrag/_storage/**'
-      - 'tests/storage/**'
-  pull_request:
-    paths:
-      - 'nano_graphrag/_storage/**'
-      - 'tests/storage/**'
+import pytest
+import sys
+from pathlib import Path
+from typing import List, Tuple
 
-jobs:
-  unit-tests:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        storage: [nano, hnswlib, qdrant, neo4j]
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    
-    - name: Install base dependencies
-      run: |
-        pip install -e .[test]
-    
-    - name: Install storage-specific deps
-      run: |
-        if [ "${{ matrix.storage }}" = "qdrant" ]; then
-          pip install qdrant-client
-        elif [ "${{ matrix.storage }}" = "neo4j" ]; then
-          pip install neo4j
-        elif [ "${{ matrix.storage }}" = "hnswlib" ]; then
-          pip install hnswlib
-        fi
-    
-    - name: Run storage tests
-      run: |
-        pytest tests/storage/test_${{ matrix.storage }}_storage.py -v
-  
-  compatibility-tests:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    
-    - name: Install all storage backends
-      run: |
-        pip install -e .[all]
-    
-    - name: Run compatibility tests
-      run: |
-        pytest tests/storage/test_compatibility.py -v
-  
-  performance-benchmarks:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    
-    - name: Install dependencies
-      run: |
-        pip install -e .[all,benchmark]
-    
-    - name: Run benchmarks
-      run: |
-        pytest tests/storage/benchmarks/ --benchmark-only
-    
-    - name: Upload results
-      uses: actions/upload-artifact@v3
-      with:
-        name: benchmark-results
-        path: benchmark_results/
-  
-  example-validation:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    
-    - name: Install dependencies
-      run: |
-        pip install -e .
-    
-    - name: Validate examples
-      run: |
-        pytest tests/examples/test_examples.py -v
+def get_available_backends() -> List[Tuple[str, str]]:
+    """Detect which storage backends are available."""
+    backends = []
+
+    # Check vector storages
+    try:
+        import nano_vectordb
+        backends.append(("vector", "nano"))
+    except ImportError:
+        pass
+
+    try:
+        import hnswlib
+        backends.append(("vector", "hnswlib"))
+    except ImportError:
+        pass
+
+    try:
+        import qdrant_client
+        backends.append(("vector", "qdrant"))
+    except ImportError:
+        pass
+
+    # Check graph storages
+    backends.append(("graph", "networkx"))  # Always available
+
+    try:
+        import neo4j
+        backends.append(("graph", "neo4j"))
+    except ImportError:
+        pass
+
+    # KV storage
+    backends.append(("kv", "json"))  # Always available
+
+    return backends
+
+def run_storage_tests():
+    """Run tests for all available storage backends."""
+    backends = get_available_backends()
+
+    print(f"Found {len(backends)} storage backends:")
+    for storage_type, backend in backends:
+        print(f"  - {storage_type}: {backend}")
+
+    # Run tests for each backend
+    failed = []
+    for storage_type, backend in backends:
+        print(f"\nTesting {backend} {storage_type} storage...")
+
+        test_file = f"tests/storage/test_{backend}_{storage_type}.py"
+        if Path(test_file).exists():
+            result = pytest.main(["-xvs", test_file])
+            if result != 0:
+                failed.append((storage_type, backend))
+        else:
+            print(f"  No specific tests found, running contract tests...")
+            result = pytest.main([
+                "-xvs",
+                f"tests/storage/contracts/test_{storage_type}_contract.py",
+                f"--backend={backend}"
+            ])
+            if result != 0:
+                failed.append((storage_type, backend))
+
+    # Summary
+    print("\n" + "="*50)
+    if failed:
+        print("FAILED backends:")
+        for storage_type, backend in failed:
+            print(f"  - {backend} ({storage_type})")
+        return 1
+    else:
+        print("All storage backends passed!")
+        return 0
+
+if __name__ == "__main__":
+    sys.exit(run_storage_tests())
 ```
+
+### Phase 4: Shared Test Fixtures
 
 #### Create `tests/storage/conftest.py`
 ```python
@@ -1096,38 +875,38 @@ def storage_backends():
         "graph": [],
         "kv": []
     }
-    
+
     # Try to import each backend
     try:
         from nano_graphrag._storage import NanoVectorDBStorage
         backends["vector"].append(("nano", NanoVectorDBStorage))
     except ImportError:
         pass
-    
+
     try:
         from nano_graphrag._storage import HNSWVectorStorage
         backends["vector"].append(("hnswlib", HNSWVectorStorage))
     except ImportError:
         pass
-    
+
     try:
         from nano_graphrag._storage import QdrantVectorStorage
         backends["vector"].append(("qdrant", QdrantVectorStorage))
     except ImportError:
         pass
-    
+
     try:
         from nano_graphrag._storage import NetworkXStorage
         backends["graph"].append(("networkx", NetworkXStorage))
     except ImportError:
         pass
-    
+
     try:
         from nano_graphrag._storage import Neo4jStorage
         backends["graph"].append(("neo4j", Neo4jStorage))
     except ImportError:
         pass
-    
+
     return backends
 ```
 
@@ -1137,40 +916,28 @@ def storage_backends():
   - [ ] BaseVectorStorageTestSuite with 15+ test cases
   - [ ] BaseGraphStorageTestSuite with 10+ test cases
   - [ ] BaseKVStorageTestSuite with 8+ test cases
-- [ ] Performance benchmarking framework:
-  - [ ] Automated benchmarks for all operations
-  - [ ] Comparison plots and reports
-  - [ ] Memory profiling
-  - [ ] Scalability tests (100 to 1M items)
-- [ ] Compatibility testing:
-  - [ ] Data migration tests between backends
-  - [ ] Serialization format validation
-  - [ ] Cross-backend query consistency
 - [ ] Example validation:
   - [ ] All examples tested for imports
   - [ ] Integration tests for runnable examples
   - [ ] Deprecation pattern detection
-- [ ] CI/CD integration:
-  - [ ] Matrix testing for all backends
-  - [ ] Conditional backend installation
-  - [ ] Performance regression detection
-  - [ ] Example validation in CI
+- [ ] Simple test runner:
+  - [ ] Detects available backends
+  - [ ] Runs appropriate test suites
+  - [ ] Provides clear pass/fail summary
 - [ ] Documentation:
   - [ ] Testing guide for new backends
-  - [ ] Performance tuning guide
-  - [ ] Compatibility matrix
+  - [ ] Contract compliance checklist
 - [ ] All existing storage implementations updated:
   - [ ] Inherit from base test suites
   - [ ] Pass all contract tests
-  - [ ] Performance baselines established
 
 ## Feature Branch
 `feature/ngraf-013-storage-testing-framework`
 
 ## Pull Request Requirements
 - All storage backends pass base test suite
-- Performance benchmarks for all backends
-- CI passes with all optional dependencies
+- Examples validate successfully
+- Test runner works with all available backends
 - Documentation for adding new storage backends
 - Example showing how to implement custom storage
 
@@ -1178,5 +945,5 @@ def storage_backends():
 - Use pytest fixtures for maximum reusability
 - Keep test suites backend-agnostic
 - Support skipping tests for missing dependencies
-- Ensure tests work in CI environment
-- Consider test parallelization for speed
+- Focus on contract compliance over performance
+- Simple execution without complex CI setup
