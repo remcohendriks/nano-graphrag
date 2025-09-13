@@ -14,7 +14,9 @@ class TestNetworkXContract(BaseGraphStorageTestSuite):
     async def storage(self, temp_storage_dir):
         """Provide NetworkX storage instance."""
         config = {
-            "working_dir": str(temp_storage_dir)
+            "working_dir": str(temp_storage_dir),
+            "max_graph_cluster_size": 10,
+            "graph_cluster_seed": 42
         }
 
         # Ensure directory exists

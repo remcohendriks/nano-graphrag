@@ -132,10 +132,10 @@ class TestStorageConfig:
         """Test validation errors."""
         with pytest.raises(ValueError, match="Unknown vector backend"):
             StorageConfig(vector_backend="milvus")
-        
+
         with pytest.raises(ValueError, match="Unknown graph backend"):
-            StorageConfig(graph_backend="neo4j")
-        
+            StorageConfig(graph_backend="dgraph")  # Invalid backend
+
         with pytest.raises(ValueError, match="Unknown KV backend"):
             StorageConfig(kv_backend="redis")
 

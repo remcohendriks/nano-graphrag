@@ -151,7 +151,7 @@ class Neo4jStorage(BaseGraphStorage):
                 # Create uniqueness constraint (also creates index)
                 if ("id",) not in existing_constraints:
                     await tx.run(
-                        f"CREATE CONSTRAINT IF NOT EXISTS "
+                        f"CREATE CONSTRAINT "
                         f"FOR (n:`{self.namespace}`) "
                         f"REQUIRE n.id IS UNIQUE"
                     )
@@ -177,7 +177,7 @@ class Neo4jStorage(BaseGraphStorage):
                     if index_props not in existing_indexes and index_props != ("id",):
                         prop_name = index_props[0]
                         await tx.run(
-                            f"CREATE INDEX IF NOT EXISTS "
+                            f"CREATE INDEX "
                             f"FOR (n:`{self.namespace}`) "
                             f"ON (n.{prop_name})"
                         )
@@ -384,7 +384,13 @@ class Neo4jStorage(BaseGraphStorage):
                     source_id = record["source_id"]
                     target_id = record["target_id"]
                     edge_data = record["edge_data"]
-                    
+
+                    # Convert numeric values back to strings for compatibility
+                    if edge_data:
+                        for key, value in edge_data.items():
+                            if isinstance(value, (int, float)):
+                                edge_data[key] = str(value)
+
                     edge_pair = (source_id, target_id)
                     result_dict[edge_pair] = edge_data
             
@@ -493,9 +499,16 @@ class Neo4jStorage(BaseGraphStorage):
         
         edges_params = []
         for source_id, target_id, edge_data in edges_data:
-            edge_data_copy = edge_data.copy() 
-            edge_data_copy.setdefault("weight", 0.0)
-            
+            edge_data_copy = edge_data.copy()
+            # Ensure weight is numeric for GDS compatibility
+            if "weight" in edge_data_copy:
+                try:
+                    edge_data_copy["weight"] = float(edge_data_copy["weight"])
+                except (ValueError, TypeError):
+                    edge_data_copy["weight"] = 0.0
+            else:
+                edge_data_copy.setdefault("weight", 0.0)
+
             edges_params.append({
                 "source_id": source_id,
                 "target_id": target_id,
@@ -584,6 +597,30 @@ class Neo4jStorage(BaseGraphStorage):
                 logger.info(
                     f"Performed graph clustering with {community_count} communities and modularities {modularities}"
                 )
+
+                # Retrieve the node->community mapping
+                mapping_result = await session.run(
+                    f"""
+                    MATCH (n:`{self.namespace}`)
+                    WHERE n.communityIds IS NOT NULL
+                    RETURN n.id AS nodeId, n.communityIds[-1] AS communityId
+                    """
+                )
+
+                # Build communities dictionary
+                communities = {}
+                async for record in mapping_result:
+                    node_id = record["nodeId"]
+                    # The last element of communityIds is the final community
+                    community_id = int(record["communityId"])
+                    communities[node_id] = community_id
+
+                # Return clustering results in expected format
+                return {
+                    "communities": communities,
+                    "community_count": community_count,
+                    "modularities": modularities
+                }
             except Exception as e:
                 logger.error(f"Error during GDS clustering: {e}")
                 raise

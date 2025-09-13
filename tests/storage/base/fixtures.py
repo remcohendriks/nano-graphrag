@@ -17,13 +17,68 @@ async def mock_embedding_func(texts: List[str]) -> np.ndarray:
 
 @wrap_embedding_func_with_attrs(embedding_dim=128, max_token_size=8192)
 async def deterministic_embedding_func(texts: List[str]) -> np.ndarray:
-    """Deterministic embeddings based on text hash for reproducible tests."""
+    """Semantic embeddings for testing - uses OpenAI if available, else keyword-based."""
+    import os
+
+    # Try to use real OpenAI embeddings if API key is available
+    if os.getenv("OPENAI_API_KEY"):
+        try:
+            from nano_graphrag.llm.providers.openai import OpenAIProvider, OpenAIEmbedder
+
+            # Use a small, cheap model for testing
+            embedder = OpenAIEmbedder(
+                model="text-embedding-3-small",
+                dimensions=128  # Request 128 dimensions to match our test dim
+            )
+
+            response = await embedder.embed(texts)
+            return np.array(response.embeddings)
+        except Exception:
+            # Fall back to keyword-based if OpenAI fails
+            pass
+
+    # Fallback: Keyword-based semantic embeddings for predictable tests
     embeddings = []
     for text in texts:
+        # Create embedding based on word presence
+        embedding = np.zeros(128)
+        words = text.lower().split()
+
+        # Important keywords for our tests
+        keyword_indices = {
+            'fruit': [0, 10, 20],
+            'apple': [1, 11, 21],
+            'banana': [2, 12, 22],
+            'orange': [3, 13, 23],
+            'citrus': [4, 14, 24],
+            'red': [5, 15, 25],
+            'yellow': [6, 16, 26],
+            'vehicle': [30, 40, 50],
+            'car': [31, 41, 51],
+            'bike': [32, 42, 52],
+            'transport': [33, 43, 53],
+            'eco': [34, 44, 54]
+        }
+
+        # Set values based on keyword presence
+        for word in words:
+            if word in keyword_indices:
+                for idx in keyword_indices[word]:
+                    embedding[idx] = 1.0
+
+        # Add small hash-based variation for uniqueness
         hash_obj = hashlib.md5(text.encode())
         seed = int(hash_obj.hexdigest()[:8], 16)
         np.random.seed(seed)
-        embeddings.append(np.random.rand(128).tolist())
+        embedding += np.random.rand(128) * 0.1
+
+        # Normalize
+        norm = np.linalg.norm(embedding)
+        if norm > 0:
+            embedding = embedding / norm
+
+        embeddings.append(embedding)
+
     return np.array(embeddings)
 
 

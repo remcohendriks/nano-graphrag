@@ -103,32 +103,55 @@ python tests/storage/run_tests.py
 ### Quick Test Commands
 
 ```bash
+# Run all unit tests (excludes integration tests)
+pytest tests/ -v
+
 # Run all contract tests
 pytest tests/storage/ -k contract -v
 
-# Run integration tests (requires services)
-pytest tests/storage/integration/ -v
+# Run specific storage backend tests
+pytest tests/storage/test_neo4j_basic.py -v
+pytest tests/storage/test_qdrant_storage.py -v
 
-# Run example validation
-pytest tests/test_examples.py -v
+# Run integration tests (requires services to be running)
+RUN_NEO4J_TESTS=1 pytest tests/storage/test_neo4j_basic.py::test_neo4j_connection -v
+RUN_QDRANT_TESTS=1 pytest tests/storage/test_qdrant_storage.py::TestQdrantIntegration -v
 
-# Run everything with the test runner
-python tests/storage/run_tests.py
+# Run both Neo4j and Qdrant integration tests
+RUN_NEO4J_TESTS=1 RUN_QDRANT_TESTS=1 pytest tests/storage/ -k "integration or test_neo4j_connection" -v
+
+# Run OpenAI integration tests (requires valid API key in .env)
+pytest nano_graphrag/llm/providers/tests/test_openai_provider.py::TestOpenAIIntegration -v
 ```
 
 ### Environment Variables for Integration Tests
 
-```bash
-# Neo4j
-export NEO4J_URL=neo4j://localhost:7687
-export NEO4J_USER=neo4j
-export NEO4J_PASSWORD=password
-export NEO4J_DATABASE=neo4j
+Integration tests are disabled by default and must be explicitly enabled:
 
-# Qdrant
-export QDRANT_URL=http://localhost:6333
-export QDRANT_API_KEY=optional_key
+```bash
+# Enable Neo4j integration tests
+export RUN_NEO4J_TESTS=1
+
+# Enable Qdrant integration tests
+export RUN_QDRANT_TESTS=1
+
+# OpenAI API configuration (in .env file)
+OPENAI_API_KEY=sk-your-actual-api-key
+OPENAI_TEST_MODEL=gpt-5-mini  # Optional, defaults to gpt-5-mini
 ```
+
+### Neo4j Configuration
+
+For Neo4j tests to work:
+1. Neo4j must be running on `localhost:7687`
+2. Authentication: username `neo4j`, password `your-secure-password-change-me`
+3. Tests use `bolt://` protocol with `neo4j_encrypted: False` for local testing
+
+### Qdrant Configuration
+
+For Qdrant tests to work:
+1. Qdrant must be running on `localhost:6333`
+2. No authentication required for local testing
 
 ## Test Organization
 

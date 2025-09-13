@@ -13,9 +13,10 @@ async def test_neo4j_initialization():
     """Test Neo4j storage initialization."""
     config = {
         "addon_params": {
-            "neo4j_url": "neo4j://localhost:7687",
-            "neo4j_auth": ("neo4j", "testpassword"),
-            "neo4j_database": "neo4j"
+            "neo4j_url": "bolt://localhost:7687",
+            "neo4j_auth": ("neo4j", "your-secure-password-change-me"),
+            "neo4j_database": "neo4j",
+            "neo4j_encrypted": False
         },
         "working_dir": "./test_neo4j"
     }
@@ -27,8 +28,8 @@ async def test_neo4j_initialization():
         
         storage = Neo4jStorage(namespace="test", global_config=config)
         
-        assert storage.neo4j_url == "neo4j://localhost:7687"
-        assert storage.neo4j_auth == ("neo4j", "testpassword")
+        assert storage.neo4j_url == "bolt://localhost:7687"
+        assert storage.neo4j_auth == ("neo4j", "your-secure-password-change-me")
         assert storage.neo4j_database == "neo4j"
         assert storage.namespace == "GraphRAG_test"  # New clean namespace format
 
@@ -38,9 +39,10 @@ async def test_constraint_creation():
     """Test that constraints are created properly."""
     config = {
         "addon_params": {
-            "neo4j_url": "neo4j://localhost:7687",
-            "neo4j_auth": ("neo4j", "testpassword"),
-            "neo4j_database": "neo4j"
+            "neo4j_url": "bolt://localhost:7687",
+            "neo4j_auth": ("neo4j", "your-secure-password-change-me"),
+            "neo4j_database": "neo4j",
+            "neo4j_encrypted": False
         },
         "working_dir": "./test_neo4j"
     }
@@ -72,8 +74,8 @@ async def test_retry_decorator():
     """Test retry decorator generation."""
     config = {
         "addon_params": {
-            "neo4j_url": "neo4j://localhost:7687",
-            "neo4j_auth": ("neo4j", "testpassword"),
+            "neo4j_url": "bolt://localhost:7687",
+            "neo4j_auth": ("neo4j", "your-secure-password-change-me"),
         },
         "working_dir": "./test_neo4j"
     }
@@ -99,16 +101,17 @@ async def test_neo4j_connection():
     # Skip if Neo4j is not available
     if not os.getenv("RUN_NEO4J_TESTS"):
         pytest.skip("Neo4j integration tests disabled (set RUN_NEO4J_TESTS=1 to enable)")
-    
+
     config = {
         "addon_params": {
-            "neo4j_url": "neo4j://localhost:7687",
-            "neo4j_auth": ("neo4j", "testpassword"),
-            "neo4j_database": "neo4j"
+            "neo4j_url": "bolt://localhost:7687",
+            "neo4j_auth": ("neo4j", "your-secure-password-change-me"),
+            "neo4j_database": "neo4j",
+            "neo4j_encrypted": False
         },
         "working_dir": "./test_neo4j"
     }
-    
+
     storage = Neo4jStorage(namespace="test_integration", global_config=config)
     
     try:
@@ -139,9 +142,10 @@ async def test_batch_operations():
     """Test batch node and edge operations."""
     config = {
         "addon_params": {
-            "neo4j_url": "neo4j://localhost:7687",
-            "neo4j_auth": ("neo4j", "testpassword"),
-            "neo4j_database": "neo4j"
+            "neo4j_url": "bolt://localhost:7687",
+            "neo4j_auth": ("neo4j", "your-secure-password-change-me"),
+            "neo4j_database": "neo4j",
+            "neo4j_encrypted": False
         },
         "working_dir": "./test_neo4j"
     }
@@ -189,9 +193,10 @@ async def test_gds_availability_check():
     """Test GDS availability check."""
     config = {
         "addon_params": {
-            "neo4j_url": "neo4j://localhost:7687",
-            "neo4j_auth": ("neo4j", "testpassword"),
-            "neo4j_database": "neo4j"
+            "neo4j_url": "bolt://localhost:7687",
+            "neo4j_auth": ("neo4j", "your-secure-password-change-me"),
+            "neo4j_database": "neo4j",
+            "neo4j_encrypted": False
         },
         "working_dir": "./test_neo4j"
     }
@@ -227,9 +232,10 @@ async def test_gds_clustering():
     """Test GDS clustering with proper error handling."""
     config = {
         "addon_params": {
-            "neo4j_url": "neo4j://localhost:7687",
-            "neo4j_auth": ("neo4j", "testpassword"),
-            "neo4j_database": "neo4j"
+            "neo4j_url": "bolt://localhost:7687",
+            "neo4j_auth": ("neo4j", "your-secure-password-change-me"),
+            "neo4j_database": "neo4j",
+            "neo4j_encrypted": False
         },
         "working_dir": "./test_neo4j",
         "graph_cluster_seed": 42,
@@ -255,10 +261,31 @@ async def test_gds_clustering():
             "modularities": [0.7, 0.8, 0.85]
         })
         
+        # Mock mapping result for community retrieval
+        class AsyncIterator:
+            def __init__(self, items):
+                self.items = iter(items)
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self.items)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        mock_mapping_result = AsyncIterator([
+            {"nodeId": "node1", "communityId": 0},
+            {"nodeId": "node2", "communityId": 0},
+            {"nodeId": "node3", "communityId": 1}
+        ])
+
         mock_session.run = AsyncMock(side_effect=[
             mock_exists_result,  # Check if graph exists
             None,  # Graph projection
             mock_result,  # Leiden algorithm
+            mock_mapping_result,  # Community mapping retrieval
             None  # Graph drop
         ])
         
@@ -267,8 +294,8 @@ async def test_gds_clustering():
         # Run clustering
         await storage.clustering("leiden")
         
-        # Verify all four calls were made (exists check, projection, leiden, drop)
-        assert mock_session.run.call_count == 4
+        # Verify all five calls were made (exists check, projection, leiden, mapping, drop)
+        assert mock_session.run.call_count == 5
         
         # Check that graph drop is called even on error
         mock_exists_result_2 = AsyncMock()
@@ -289,9 +316,10 @@ async def test_label_sanitization():
     """Test that entity type labels are properly sanitized."""
     config = {
         "addon_params": {
-            "neo4j_url": "neo4j://localhost:7687",
-            "neo4j_auth": ("neo4j", "testpassword"),
-            "neo4j_database": "neo4j"
+            "neo4j_url": "bolt://localhost:7687",
+            "neo4j_auth": ("neo4j", "your-secure-password-change-me"),
+            "neo4j_database": "neo4j",
+            "neo4j_encrypted": False
         },
         "working_dir": "./test_neo4j"
     }
@@ -317,9 +345,10 @@ async def test_return_type_fix():
     """Test that node_degrees_batch returns correct type."""
     config = {
         "addon_params": {
-            "neo4j_url": "neo4j://localhost:7687",
-            "neo4j_auth": ("neo4j", "testpassword"),
-            "neo4j_database": "neo4j"
+            "neo4j_url": "bolt://localhost:7687",
+            "neo4j_auth": ("neo4j", "your-secure-password-change-me"),
+            "neo4j_database": "neo4j",
+            "neo4j_encrypted": False
         },
         "working_dir": "./test_neo4j"
     }

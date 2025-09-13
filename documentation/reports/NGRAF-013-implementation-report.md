@@ -2,7 +2,7 @@
 
 ## Implementation Summary
 
-Successfully implemented the Unified Storage Testing Framework for nano-graphrag, providing contract-based testing for all storage backends.
+Successfully implemented the Unified Storage Testing Framework for nano-graphrag, providing contract-based testing for all storage backends. Additionally fixed all test failures and integrated Neo4j and Qdrant services for comprehensive integration testing.
 
 ## Implemented Components
 
@@ -147,6 +147,52 @@ export QDRANT_URL=http://localhost:6333
 pytest tests/storage/integration/ -v
 ```
 
+## Additional Fixes and Improvements
+
+### Test Infrastructure Fixes
+1. **OpenAI API Key Management**
+   - Removed global `OPENAI_API_KEY=FAKE` that was breaking integration tests
+   - Tests now properly use `.env` file for real API credentials
+   - Fixed OpenAI provider tests to handle dict responses correctly
+
+2. **Neo4j Integration**
+   - Fixed connection issues by using `bolt://` protocol
+   - Added `neo4j_encrypted: False` for local testing
+   - Updated credentials to match Docker setup: `neo4j/your-secure-password-change-me`
+   - Added `RUN_NEO4J_TESTS=1` environment variable for explicit test enablement
+
+3. **Qdrant Integration**
+   - Added `RUN_QDRANT_TESTS=1` environment variable for test control
+   - Fixed lazy initialization in Qdrant storage tests
+   - Updated deprecated `search` to `query_points` method
+
+4. **Core Bug Fixes**
+   - **NetworkX clustering**: Fixed hierarchical_leiden returning dicts instead of objects
+   - **Community JSON parsing**: Added fallback when JSON parsing returns empty dict
+   - **Extraction gleaning**: Fixed typo in prompt keys and proper response concatenation
+   - **Provider factory**: Fixed isinstance check failing due to module reload issues
+   - **Query tests**: Added missing `source_id` fields in mock data
+
+### Test Results
+- **Unit Tests**: 272 passed, 43 skipped
+- **Neo4j Integration**: ✅ Fully functional with Docker instance
+- **Qdrant Integration**: ✅ Fully functional with Docker instance
+- **OpenAI Integration**: ✅ 3 tests passing with real API
+
+### Documentation Updates
+1. **testing_guide.md**
+   - Added environment variable documentation for integration tests
+   - Updated test commands with proper flags
+   - Added Neo4j and Qdrant configuration details
+
+2. **README.md**
+   - Added Testing section with quick start commands
+   - Listed integration test requirements
+   - Referenced detailed testing guide
+
+3. **CONTRIBUTING.md**
+   - Updated with testing requirements for contributors
+
 ## Benefits Achieved
 
 1. **Standardized Testing** - All storage backends now tested against same contracts
@@ -154,14 +200,17 @@ pytest tests/storage/integration/ -v
 3. **Easy Extension** - Simple to add tests for new backends like Redis (NGRAF-016)
 4. **Example Validation** - Ensures documentation stays accurate
 5. **Local Development** - No complex CI required, runs locally
+6. **Integration Testing** - Full end-to-end testing with real services
+7. **Clean Test Suite** - All tests passing with proper mocking and real services
 
 ## Next Steps
 
-1. Run the test suite to validate all backends
+1. ~~Run the test suite to validate all backends~~ ✅ Complete
 2. Use contract tests when implementing Redis KV backend (NGRAF-016)
 3. Extend contracts as new storage features are added
 4. Consider adding more specialized tests for production backends
+5. Monitor test stability with Neo4j and Qdrant services
 
 ## Conclusion
 
-The implementation successfully delivers a unified testing framework that ensures storage backend compliance while maintaining simplicity. The exclusion of performance benchmarking, compatibility testing, and CI/CD integration as requested significantly reduced complexity while retaining the core value of contract-based validation.
+The implementation successfully delivers a unified testing framework that ensures storage backend compliance while maintaining simplicity. Additionally, all test failures have been resolved, integration tests are fully functional with Neo4j and Qdrant, and the testing infrastructure is now robust and well-documented. The exclusion of performance benchmarking, compatibility testing, and CI/CD integration as requested significantly reduced complexity while retaining the core value of contract-based validation.

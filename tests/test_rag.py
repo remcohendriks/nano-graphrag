@@ -18,8 +18,6 @@ from tests.utils import (
     mock_embedding_func
 )
 
-# Set fake API key to avoid environment errors
-os.environ["OPENAI_API_KEY"] = "FAKE"
 
 # Use tmp_path fixture for working directory
 FAKE_RESPONSE = "Hello world"

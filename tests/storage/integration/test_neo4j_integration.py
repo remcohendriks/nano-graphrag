@@ -22,14 +22,18 @@ class TestNeo4jIntegration(BaseGraphStorageTestSuite):
         """Provide Neo4j storage instance."""
         config = {
             "addon_params": {
-                "neo4j_url": os.environ.get("NEO4J_URL", "neo4j://localhost:7687"),
+                "neo4j_url": os.environ.get("NEO4J_URL", "bolt://localhost:7687"),
                 "neo4j_auth": (
                     os.environ.get("NEO4J_USER", "neo4j"),
-                    os.environ.get("NEO4J_PASSWORD", "password")
+                    os.environ.get("NEO4J_PASSWORD", "your-secure-password-change-me")
                 ),
-                "neo4j_database": os.environ.get("NEO4J_DATABASE", "neo4j")
+                "neo4j_database": os.environ.get("NEO4J_DATABASE", "neo4j"),
+                "neo4j_encrypted": False  # Disable SSL for local Docker
             },
-            "working_dir": "./test_neo4j_integration"
+            "working_dir": "./test_neo4j_integration",
+            "graph_cluster_seed": 42,  # Required for clustering
+            "max_graph_cluster_size": 10,
+            "graph_cluster_min_size": 3
         }
 
         storage = Neo4jStorage(namespace="test_integration", global_config=config)
@@ -42,7 +46,8 @@ class TestNeo4jIntegration(BaseGraphStorageTestSuite):
 
         # Clean up after tests
         await storage._debug_delete_all_node_edges()
-        await storage.close()
+        if hasattr(storage, 'async_driver'):
+            await storage.async_driver.close()
 
     @pytest.fixture
     def contract(self):
@@ -93,4 +98,5 @@ class TestNeo4jIntegration(BaseGraphStorageTestSuite):
         if node:
             assert node.get("namespace") != "test_integration"
 
-        await other_storage.close()
+        if hasattr(other_storage, 'async_driver'):
+            await other_storage.async_driver.close()

@@ -45,6 +45,13 @@ class TestQdrantIntegration(BaseVectorStorageTestSuite):
             meta_fields={"entity_name", "entity_type", "description"}
         )
 
+        # Clean up any existing collection before starting
+        try:
+            client = await storage._get_client()
+            await client.delete_collection(storage.namespace)
+        except Exception:
+            pass  # Collection might not exist
+
         # Initialize storage
         await storage.index_start_callback()
 
