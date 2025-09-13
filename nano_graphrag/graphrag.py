@@ -1,24 +1,16 @@
 import asyncio
-import os
-import sys
-from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Dict, List, Optional, Union, cast, Any
+from typing import Dict, List, Optional, Union, Any
 
 from .config import GraphRAGConfig
 from .llm.providers import get_llm_provider, get_embedding_provider
 from ._chunking import (
     chunking_by_token_size,
-    get_chunks,
     get_chunks_v2,
-)
-from ._extraction import (
-    extract_entities_from_chunks,
 )
 from ._community import (
     generate_community_report,
-    summarize_community,
 )
 from ._query import (
     local_query,
@@ -37,7 +29,6 @@ from ._utils import (
 )
 from .base import (
     BaseGraphStorage,
-    BaseKVStorage,
     BaseVectorStorage,
     QueryParam,
 )
@@ -244,7 +235,7 @@ class GraphRAG:
         entity_vdb: BaseVectorStorage,
         tokenizer_wrapper: TokenizerWrapper,
         global_config: Dict[str, Any],
-        using_amazon_bedrock: bool = False,
+        **kwargs  # Accept but ignore additional args like using_amazon_bedrock
     ) -> Optional[BaseGraphStorage]:
         """Wrapper to use new extractor with legacy interface."""
         from nano_graphrag._extraction import (
@@ -361,7 +352,7 @@ class GraphRAG:
             if self.config.query.enable_local:
                 logger.info(f"[INSERT] Starting entity extraction...")
                 chunk_map = {}
-                for i, chunk in enumerate(chunks):
+                for chunk in chunks:
                     # Include doc_id in hash to prevent cross-document chunk collisions
                     chunk_id_content = f"{doc_id}::{chunk['content']}"
                     chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
