@@ -30,25 +30,63 @@ class DSPyEntityExtractor(BaseEntityExtractor):
 
         # Initialize DSPy with model
         if self.config.model_func:
-            # Wrap async model function for DSPy
-            class AsyncModelWrapper:
+            # Create a thread-safe sync wrapper for async function
+            import asyncio
+            import threading
+            from concurrent.futures import ThreadPoolExecutor
+
+            # Reuse a single executor for all calls
+            executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dspy-sync")
+
+            class AsyncToSyncWrapper:
                 def __init__(self, async_func):
                     self.async_func = async_func
+                    self._executor = executor
+                    self._loop = None
+                    self._thread = None
+
+                def _ensure_event_loop(self):
+                    """Ensure we have an event loop for sync execution."""
+                    if self._loop is None or not self._loop.is_running():
+                        self._loop = asyncio.new_event_loop()
+
+                        def run_loop():
+                            asyncio.set_event_loop(self._loop)
+                            self._loop.run_forever()
+
+                        self._thread = threading.Thread(target=run_loop, daemon=True)
+                        self._thread.start()
+                    return self._loop
 
                 def __call__(self, prompt, **kwargs):
-                    # DSPy expects synchronous calls
-                    import asyncio
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # We're already in async context, create task
+                    """Execute async function synchronously."""
+                    try:
+                        # Try to use existing event loop if in async context
+                        loop = asyncio.get_running_loop()
+                        # We're in async context, use asyncio.to_thread
+                        import asyncio
                         import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(asyncio.run, self.async_func(prompt, **kwargs))
-                            return future.result()
-                    else:
-                        return loop.run_until_complete(self.async_func(prompt, **kwargs))
+                        future = concurrent.futures.Future()
 
-            lm = AsyncModelWrapper(self.config.model_func)
+                        async def run_async():
+                            try:
+                                result = await self.async_func(prompt, **kwargs)
+                                future.set_result(result)
+                            except Exception as e:
+                                future.set_exception(e)
+
+                        asyncio.create_task(run_async())
+                        return future.result(timeout=30)
+                    except RuntimeError:
+                        # No event loop, create one for sync execution
+                        loop = self._ensure_event_loop()
+                        future = asyncio.run_coroutine_threadsafe(
+                            self.async_func(prompt, **kwargs),
+                            loop
+                        )
+                        return future.result(timeout=30)
+
+            lm = AsyncToSyncWrapper(self.config.model_func)
         else:
             # Use default OpenAI
             lm = self._dspy.OpenAI(

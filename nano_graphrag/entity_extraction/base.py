@@ -167,7 +167,8 @@ class BaseEntityExtractor(ABC):
         seen_edges = set()
 
         for edge in merged_edges:
-            edge_key = (edge[0], edge[1], edge[2].get("relation", ""))
+            # Use description as key since extractors don't set "relation"
+            edge_key = (edge[0], edge[1], edge[2].get("description", ""))
             if edge_key not in seen_edges:
                 unique_edges.append(edge)
                 seen_edges.add(edge_key)

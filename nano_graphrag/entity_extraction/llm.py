@@ -29,12 +29,17 @@ class LLMEntityExtractor(BaseEntityExtractor):
         storage: Optional[Any] = None
     ) -> ExtractionResult:
         """Extract entities from chunks using LLM prompts."""
-        results = []
+        import asyncio
 
-        for chunk_id, chunk_data in chunks.items():
-            text = chunk_data.get("content", "")
-            result = await self.extract_single(text, chunk_id)
-            results.append(result)
+        # Parallelize extraction across chunks
+        tasks = [
+            self.extract_single(chunk_data.get("content", ""), chunk_id)
+            for chunk_id, chunk_data in chunks.items()
+        ]
+
+        # Execute all extractions concurrently
+        # Rate limiting is handled by the wrapped model_func
+        results = await asyncio.gather(*tasks)
 
         return self.deduplicate_entities(results)
 

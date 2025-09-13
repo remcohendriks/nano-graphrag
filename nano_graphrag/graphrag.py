@@ -251,6 +251,22 @@ class GraphRAG:
         # Extract entities using new abstraction
         result = await self.entity_extractor.extract(chunks)
 
+        # Validate extraction result
+        if hasattr(self.entity_extractor, 'validate_result'):
+            if not self.entity_extractor.validate_result(result):
+                logger.warning("Extraction result validation failed, clamping to configured limits")
+                # Clamp to configured maximums
+                max_entities = self.entity_extractor.config.max_entities_per_chunk * len(chunks)
+                max_edges = self.entity_extractor.config.max_relationships_per_chunk * len(chunks)
+
+                if len(result.nodes) > max_entities:
+                    logger.warning(f"Clamping entities from {len(result.nodes)} to {max_entities}")
+                    result.nodes = dict(list(result.nodes.items())[:max_entities])
+
+                if len(result.edges) > max_edges:
+                    logger.warning(f"Clamping relationships from {len(result.edges)} to {max_edges}")
+                    result.edges = result.edges[:max_edges]
+
         # Convert to legacy format and store
         maybe_nodes = defaultdict(list)
         maybe_edges = defaultdict(list)

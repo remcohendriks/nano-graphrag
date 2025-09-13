@@ -4,8 +4,6 @@ import importlib
 from typing import Optional, Any
 
 from .base import BaseEntityExtractor, ExtractorConfig
-from .llm import LLMEntityExtractor
-from .dspy_extractor import DSPyEntityExtractor
 from nano_graphrag._utils import logger
 
 
@@ -50,10 +48,12 @@ def create_extractor(
 
     if strategy == "llm":
         logger.info("Creating LLM entity extractor")
+        from .llm import LLMEntityExtractor
         return LLMEntityExtractor(config)
 
     elif strategy == "dspy":
         logger.info("Creating DSPy entity extractor")
+        from .dspy_extractor import DSPyEntityExtractor
         return DSPyEntityExtractor(config)
 
     elif custom_extractor_class:
