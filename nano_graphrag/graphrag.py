@@ -1,25 +1,16 @@
 import asyncio
-import os
-import sys
-from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Dict, List, Optional, Union, cast
+from typing import Dict, List, Optional, Union, Any
 
 from .config import GraphRAGConfig
 from .llm.providers import get_llm_provider, get_embedding_provider
 from ._chunking import (
     chunking_by_token_size,
-    get_chunks,
     get_chunks_v2,
-)
-from ._extraction import (
-    extract_entities,
-    extract_entities_from_chunks,
 )
 from ._community import (
     generate_community_report,
-    summarize_community,
 )
 from ._query import (
     local_query,
@@ -38,7 +29,6 @@ from ._utils import (
 )
 from .base import (
     BaseGraphStorage,
-    BaseKVStorage,
     BaseVectorStorage,
     QueryParam,
 )
@@ -49,7 +39,7 @@ class GraphRAG:
     
     def __init__(self, config: Optional[GraphRAGConfig] = None):
         """Initialize GraphRAG with configuration object.
-        
+
         Args:
             config: GraphRAGConfig object. If None, uses defaults.
         """
@@ -59,7 +49,8 @@ class GraphRAG:
         self._init_providers()
         self._init_storage()
         self._init_functions()
-        
+        self._init_extractor()
+
         logger.info(f"GraphRAG initialized with config: {self.config}")
     
     def _init_working_dir(self):
@@ -212,15 +203,114 @@ class GraphRAG:
             partial(self.cheap_model_func, hashing_kv=self.llm_response_cache)
         )
         
-        # Set entity extraction function
-        self.entity_extraction_func = extract_entities
+        # Entity extraction function will be initialized separately
+        self.entity_extraction_func = None
         
         # Set chunk function
         self.chunk_func = chunking_by_token_size
         
         # Set conversion function
         self.convert_response_to_json_func = convert_response_to_json
-    
+
+    def _init_extractor(self):
+        """Initialize entity extractor based on configuration."""
+        from nano_graphrag.entity_extraction.factory import create_extractor
+
+        self.entity_extractor = create_extractor(
+            strategy=self.config.entity_extraction.strategy,
+            model_func=self.best_model_func,
+            model_name=self.config.llm.model,
+            entity_types=["PERSON", "ORGANIZATION", "LOCATION", "EVENT", "CONCEPT"],
+            max_gleaning=self.config.entity_extraction.max_gleaning,
+            summary_max_tokens=self.config.entity_extraction.summary_max_tokens
+        )
+
+        # Keep compatibility with legacy extraction function
+        self.entity_extraction_func = self._extract_entities_wrapper
+
+    async def _extract_entities_wrapper(
+        self,
+        chunks: Dict[str, Any],
+        knwoledge_graph_inst: BaseGraphStorage,
+        entity_vdb: BaseVectorStorage,
+        tokenizer_wrapper: TokenizerWrapper,
+        global_config: Dict[str, Any],
+        **kwargs  # Accept but ignore additional args like using_amazon_bedrock
+    ) -> Optional[BaseGraphStorage]:
+        """Wrapper to use new extractor with legacy interface."""
+        from nano_graphrag._extraction import (
+            _merge_nodes_then_upsert,
+            _merge_edges_then_upsert
+        )
+        from nano_graphrag._utils import compute_mdhash_id
+        from collections import defaultdict
+
+        # Initialize extractor if needed
+        await self.entity_extractor.initialize()
+
+        # Extract entities using new abstraction
+        result = await self.entity_extractor.extract(chunks)
+
+        # Validate extraction result
+        if hasattr(self.entity_extractor, 'validate_result'):
+            if not self.entity_extractor.validate_result(result):
+                logger.warning("Extraction result validation failed, clamping to configured limits")
+                # Clamp to configured maximums
+                max_entities = self.entity_extractor.config.max_entities_per_chunk * len(chunks)
+                max_edges = self.entity_extractor.config.max_relationships_per_chunk * len(chunks)
+
+                if len(result.nodes) > max_entities:
+                    logger.warning(f"Clamping entities from {len(result.nodes)} to {max_entities}")
+                    result.nodes = dict(list(result.nodes.items())[:max_entities])
+
+                if len(result.edges) > max_edges:
+                    logger.warning(f"Clamping relationships from {len(result.edges)} to {max_edges}")
+                    result.edges = result.edges[:max_edges]
+
+        # Convert to legacy format and store
+        maybe_nodes = defaultdict(list)
+        maybe_edges = defaultdict(list)
+
+        for node_id, node_data in result.nodes.items():
+            maybe_nodes[node_id].append(node_data)
+
+        for edge in result.edges:
+            src_id, tgt_id, edge_data = edge
+            maybe_edges[(src_id, tgt_id)].append(edge_data)
+
+        # Merge and upsert nodes
+        all_entities_data = await asyncio.gather(
+            *[
+                _merge_nodes_then_upsert(k, v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
+                for k, v in maybe_nodes.items()
+            ]
+        )
+
+        # Merge and upsert edges
+        await asyncio.gather(
+            *[
+                _merge_edges_then_upsert(k[0], k[1], v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
+                for k, v in maybe_edges.items()
+            ]
+        )
+
+        if not len(all_entities_data):
+            logger.warning("Didn't extract any entities, maybe your LLM is not working")
+            return None
+
+        # Update entity vector DB
+        if entity_vdb is not None:
+            data_for_vdb = {
+                compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
+                    "content": dp["entity_name"] + dp["description"],
+                    "entity_name": dp["entity_name"],
+                }
+                for dp in all_entities_data
+            }
+            await entity_vdb.upsert(data_for_vdb)
+
+        return knwoledge_graph_inst
+
     def insert(self, string_or_strings: Union[str, List[str]]):
         """Insert documents synchronously."""
         loop = always_get_an_event_loop()
@@ -278,14 +368,14 @@ class GraphRAG:
             if self.config.query.enable_local:
                 logger.info(f"[INSERT] Starting entity extraction...")
                 chunk_map = {}
-                for i, chunk in enumerate(chunks):
+                for chunk in chunks:
                     # Include doc_id in hash to prevent cross-document chunk collisions
                     chunk_id_content = f"{doc_id}::{chunk['content']}"
                     chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
                     chunk_map[chunk_id] = chunk
                 
-                logger.info(f"[INSERT] Calling extract_entities with {len(chunk_map)} chunks...")
-                await extract_entities(
+                logger.info(f"[INSERT] Calling entity extraction with {len(chunk_map)} chunks...")
+                await self.entity_extraction_func(
                     chunk_map,
                     self.chunk_entity_relation_graph,
                     self.entities_vdb,
