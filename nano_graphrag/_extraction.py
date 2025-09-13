@@ -215,8 +215,8 @@ async def extract_entities(
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
         entity_types=",".join(PROMPTS["DEFAULT_ENTITY_TYPES"]),
     )
-    continue_prompt = PROMPTS["entiti_continue_extraction"]
-    if_loop_prompt = PROMPTS["entiti_if_loop_extraction"]
+    continue_prompt = PROMPTS["entity_continue_extraction"]
+    if_loop_prompt = PROMPTS["entity_if_loop_extraction"]
 
     already_processed = 0
     already_entities = 0
@@ -387,12 +387,12 @@ async def extract_entities_from_chunks(
         # Then do additional gleaning passes if configured
         for glean_index in range(max_gleaning):
             glean_response = await model_func(
-                PROMPTS.get("entiti_continue_extraction", PROMPTS.get("entity_extraction", "")).format(**context)
+                PROMPTS.get("entity_continue_extraction", PROMPTS.get("entity_extraction", "")).format(**context)
             )
             all_responses.append(glean_response)
         
-        # Combine all responses
-        response = "\n".join(all_responses)
+        # Combine all responses with record delimiter to ensure proper parsing
+        response = context_base["record_delimiter"].join(all_responses)
         
         # Parse entities and relationships from delimiter format response
         # The LLM returns format like: ("entity"<|>NAME<|>TYPE<|>DESC)##("relationship"<|>...)

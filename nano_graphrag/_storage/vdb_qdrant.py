@@ -19,10 +19,14 @@ class QdrantVectorStorage(BaseVectorStorage):
         
         from qdrant_client import AsyncQdrantClient, models
         
-        # Get configuration
-        self._url = self.global_config.get("qdrant_url", "http://localhost:6333")
-        self._api_key = self.global_config.get("qdrant_api_key", None)
-        self._collection_params = self.global_config.get("qdrant_collection_params", {})
+        # Get configuration - check addon_params first, then top-level
+        addon_params = self.global_config.get("addon_params", {})
+        self._url = addon_params.get("qdrant_url",
+                                     self.global_config.get("qdrant_url", "http://localhost:6333"))
+        self._api_key = addon_params.get("qdrant_api_key",
+                                         self.global_config.get("qdrant_api_key", None))
+        self._collection_params = addon_params.get("qdrant_collection_params",
+                                                   self.global_config.get("qdrant_collection_params", {}))
         
         # Store models for later use (needed before client creation)
         self._models = models
@@ -61,16 +65,23 @@ class QdrantVectorStorage(BaseVectorStorage):
         
         if not exists:
             logger.info(f"Creating Qdrant collection: {self.namespace}")
-            # Create collection with cosine distance
-            await client.create_collection(
-                collection_name=self.namespace,
-                vectors_config=self._models.VectorParams(
-                    size=self.embedding_func.embedding_dim,
-                    distance=self._models.Distance.COSINE
-                ),
-                **self._collection_params
-            )
-            logger.info(f"Created Qdrant collection: {self.namespace}")
+            try:
+                # Create collection with cosine distance
+                await client.create_collection(
+                    collection_name=self.namespace,
+                    vectors_config=self._models.VectorParams(
+                        size=self.embedding_func.embedding_dim,
+                        distance=self._models.Distance.COSINE
+                    ),
+                    **self._collection_params
+                )
+                logger.info(f"Created Qdrant collection: {self.namespace}")
+            except Exception as e:
+                # Handle race condition where another process created it
+                if "already exists" in str(e).lower() or "conflict" in str(e).lower():
+                    logger.debug(f"Collection {self.namespace} was created by another process")
+                else:
+                    raise
         else:
             logger.debug(f"Qdrant collection '{self.namespace}' already exists")
         
@@ -178,16 +189,16 @@ class QdrantVectorStorage(BaseVectorStorage):
         
         # Search in Qdrant
         client = await self._get_client()
-        results = await client.search(
+        response = await client.query_points(
             collection_name=self.namespace,
-            query_vector=query_embedding,
+            query=query_embedding,
             limit=top_k,
             with_payload=True
         )
-        
+
         # Format results for GraphRAG compatibility
         formatted_results = []
-        for hit in results:
+        for hit in response.points:
             result = {
                 "id": hit.payload.get("id", str(hit.id)),  # Use stored ID from payload, fallback to numeric
                 "content": hit.payload.get("content", ""),

@@ -1,5 +1,106 @@
 [
   {
+    "timestamp": "2025-09-13T19:22:55.794532+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "json",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "passed",
+    "timings": {
+      "insert": 371.3419768810272,
+      "global_query": 27.56902289390564,
+      "local_query": 12.867974758148193,
+      "naive_query": 7.509526014328003,
+      "reload": 6.60394287109375,
+      "total": 426.59576964378357
+    },
+    "counts": {
+      "nodes": 80,
+      "edges": 90,
+      "communities": 39,
+      "chunks": 14
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-13T16:14:46.905812+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "json",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "passed",
+    "timings": {
+      "insert": 270.3752338886261,
+      "global_query": 21.802857875823975,
+      "local_query": 8.859941005706787,
+      "naive_query": 5.941586971282959,
+      "reload": 7.35676908493042,
+      "total": 315.00465297698975
+    },
+    "counts": {
+      "nodes": 114,
+      "edges": 103,
+      "communities": 67,
+      "chunks": 14
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-13T16:09:15.950907+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "nano",
+      "graph_backend": "networkx",
+      "kv_backend": "json"
+    },
+    "status": "passed",
+    "timings": {
+      "insert": 252.2980499267578,
+      "global_query": 23.11893081665039,
+      "local_query": 12.43512487411499,
+      "naive_query": 6.65747594833374,
+      "reload": 7.008208274841309,
+      "total": 301.84755086898804
+    },
+    "counts": {
+      "nodes": 78,
+      "edges": 86,
+      "communities": 22,
+      "chunks": 14
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
     "timestamp": "2025-09-12T19:59:50.194607+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",

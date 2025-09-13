@@ -98,16 +98,36 @@ class HNSWVectorStorage(BaseVectorStorage):
             }
             for k, v in data.items()
         ]
-        contents = [v["content"] for v in data.values()]
-        batch_size = min(self._embedding_batch_num, len(contents))
-        embeddings = np.concatenate(
-            await asyncio.gather(
-                *[
-                    self.embedding_func(contents[i : i + batch_size])
-                    for i in range(0, len(contents), batch_size)
-                ]
+
+        # Collect items that need embeddings vs those that have them
+        embeddings_to_use = []
+        contents_to_embed = []
+        indices_to_embed = []
+
+        for i, (k, v) in enumerate(data.items()):
+            if "embedding" in v:
+                embeddings_to_use.append(v["embedding"])
+            else:
+                contents_to_embed.append(v.get("content", k))
+                indices_to_embed.append(i)
+
+        # Generate embeddings for items that need them
+        if contents_to_embed:
+            batch_size = min(self._embedding_batch_num, len(contents_to_embed))
+            generated_embeddings = np.concatenate(
+                await asyncio.gather(
+                    *[
+                        self.embedding_func(contents_to_embed[i : i + batch_size])
+                        for i in range(0, len(contents_to_embed), batch_size)
+                    ]
+                )
             )
-        )
+
+            # Insert generated embeddings at correct positions
+            for idx, embedding in zip(indices_to_embed, generated_embeddings):
+                embeddings_to_use.insert(idx, embedding)
+
+        embeddings = np.array(embeddings_to_use)
 
         ids = np.fromiter(
             (xxhash.xxh32_intdigest(d["id"].encode()) for d in list_data),

@@ -174,7 +174,7 @@ class NetworkXStorage(BaseGraphStorage):
     async def clustering(self, algorithm: str):
         if algorithm not in self._clustering_algorithms:
             raise ValueError(f"Clustering algorithm {algorithm} not supported")
-        await self._clustering_algorithms[algorithm]()
+        return await self._clustering_algorithms[algorithm]()
 
     async def community_schema(self) -> dict[str, SingleCommunitySchema]:
         results = defaultdict(
@@ -270,25 +270,54 @@ class NetworkXStorage(BaseGraphStorage):
             logger.warning("Graph is empty, skipping clustering")
             return
         
-        graph = NetworkXStorage.stable_largest_connected_component(self._graph)
-        
-        # Check if the largest component is empty
-        if len(graph.nodes()) == 0:
+        # Handle multiple connected components
+        import networkx as nx
+        connected_components = list(nx.connected_components(self._graph))
+
+        if not connected_components:
             logger.warning("No connected components found, skipping clustering")
             return
-        
-        community_mapping = hierarchical_leiden(
-            graph,
-            max_cluster_size=self.global_config["max_graph_cluster_size"],
-            random_seed=self.global_config["graph_cluster_seed"],
-        )
+
+        # Process each connected component separately
+        community_mapping = []
+        for comp_idx, component in enumerate(connected_components):
+            subgraph = self._graph.subgraph(component).copy()
+
+            # Skip very small components
+            if len(subgraph.nodes()) < 2:
+                # Assign each node in tiny component to its own community
+                for node in subgraph.nodes():
+                    community_mapping.append({
+                        "node": node,
+                        "level": 0,
+                        "cluster": comp_idx * 1000  # Ensure different components get different cluster IDs
+                    })
+                continue
+
+            # Apply hierarchical_leiden to this component
+            component_mapping = hierarchical_leiden(
+                subgraph,
+                max_cluster_size=self.global_config["max_graph_cluster_size"],
+                random_seed=self.global_config["graph_cluster_seed"],
+            )
+
+            # Adjust cluster IDs to ensure uniqueness across components
+            for partition in component_mapping:
+                # hierarchical_leiden returns list of dicts with 'node', 'level', 'cluster' keys
+                adjusted_partition = {
+                    "node": partition["node"] if isinstance(partition, dict) else partition.node,
+                    "level": partition["level"] if isinstance(partition, dict) else partition.level,
+                    "cluster": (partition["cluster"] if isinstance(partition, dict) else partition.cluster) + (comp_idx * 1000)
+                }
+                community_mapping.append(adjusted_partition)
 
         node_communities: dict[str, list[dict[str, str]]] = defaultdict(list)
         __levels = defaultdict(set)
         for partition in community_mapping:
-            level_key = partition.level
-            cluster_id = partition.cluster
-            node_communities[partition.node].append(
+            level_key = partition["level"] if isinstance(partition, dict) else partition.level
+            cluster_id = partition["cluster"] if isinstance(partition, dict) else partition.cluster
+            node_id = partition["node"] if isinstance(partition, dict) else partition.node
+            node_communities[node_id].append(
                 {"level": level_key, "cluster": cluster_id}
             )
             __levels[level_key].add(cluster_id)
@@ -296,6 +325,20 @@ class NetworkXStorage(BaseGraphStorage):
         __levels = {k: len(v) for k, v in __levels.items()}
         logger.info(f"Each level has communities: {dict(__levels)}")
         self._cluster_data_to_subgraphs(node_communities)
+
+        # Return clustering results in expected format
+        # Convert hierarchical communities to simple mapping using last level
+        simple_communities = {}
+        for node_id, levels in node_communities.items():
+            if levels:
+                # Use the last (most granular) level
+                simple_communities[node_id] = levels[-1]["cluster"]
+
+        return {
+            "communities": simple_communities,
+            "levels": __levels,
+            "hierarchical": node_communities
+        }
 
     async def embed_nodes(self, algorithm: str) -> tuple[np.ndarray, list[str]]:
         if algorithm not in self._node_embed_algorithms:

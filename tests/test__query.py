@@ -154,8 +154,8 @@ class TestQuery:
         
         # Mock node data
         mock_storages["graph"].get_nodes_batch.return_value = [
-            {"entity_name": "entity1", "entity_type": "PERSON", "description": "Person 1"},
-            {"entity_name": "entity2", "entity_type": "ORG", "description": "Org 1"}
+            {"entity_name": "entity1", "entity_type": "PERSON", "description": "Person 1", "source_id": "chunk1"},
+            {"entity_name": "entity2", "entity_type": "ORG", "description": "Org 1", "source_id": "chunk2"}
         ]
         
         # Mock node degrees
@@ -167,7 +167,12 @@ class TestQuery:
         # Mock empty results for other components
         mock_storages["graph"].get_edges_batch.return_value = []
         mock_storages["graph"].edge_degrees_batch.return_value = []
-        
+
+        # Mock text chunks
+        mock_storages["text_chunks"].get_by_id.return_value = {
+            "content": "Test chunk content"
+        }
+
         context = await _build_local_query_context(
             query,
             mock_storages["graph"],
@@ -195,13 +200,18 @@ class TestQuery:
         
         # Mock node data
         mock_storages["graph"].get_nodes_batch.return_value = [
-            {"entity_name": "entity1", "description": "Test entity"}
+            {"entity_name": "entity1", "description": "Test entity", "source_id": "chunk1"}
         ]
         mock_storages["graph"].node_degrees_batch.return_value = [1]
         mock_storages["graph"].get_nodes_edges_batch.return_value = [[]]
         mock_storages["graph"].get_edges_batch.return_value = []
         mock_storages["graph"].edge_degrees_batch.return_value = []
-        
+
+        # Mock text chunks
+        mock_storages["text_chunks"].get_by_id.return_value = {
+            "content": "Test chunk content"
+        }
+
         global_config = {
             "best_model_func": AsyncMock(return_value="Query response")
         }

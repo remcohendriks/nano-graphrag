@@ -186,7 +186,13 @@ class Neo4jStorage(BaseGraphStorage):
             try:
                 await session.execute_write(create_constraints)
             except Exception as e:
-                logger.warning(f"Constraint/index creation warning: {e}")
+                # Only suppress already-exists errors, re-raise others
+                error_msg = str(e).lower()
+                if "already exists" in error_msg or "equivalent constraint already exists" in error_msg:
+                    logger.debug(f"Constraint/index already exists (expected): {e}")
+                else:
+                    logger.error(f"Failed to create constraints/indexes: {e}")
+                    raise
 
     async def _init_workspace(self):
         await self.async_driver.verify_authentication()
@@ -384,7 +390,11 @@ class Neo4jStorage(BaseGraphStorage):
                     source_id = record["source_id"]
                     target_id = record["target_id"]
                     edge_data = record["edge_data"]
-                    
+
+                    # Keep numeric types as-is for consistency
+                    # Note: If specific consumers need string conversion,
+                    # they should handle it at their boundary
+
                     edge_pair = (source_id, target_id)
                     result_dict[edge_pair] = edge_data
             
@@ -493,9 +503,16 @@ class Neo4jStorage(BaseGraphStorage):
         
         edges_params = []
         for source_id, target_id, edge_data in edges_data:
-            edge_data_copy = edge_data.copy() 
-            edge_data_copy.setdefault("weight", 0.0)
-            
+            edge_data_copy = edge_data.copy()
+            # Ensure weight is numeric for GDS compatibility
+            if "weight" in edge_data_copy:
+                try:
+                    edge_data_copy["weight"] = float(edge_data_copy["weight"])
+                except (ValueError, TypeError):
+                    edge_data_copy["weight"] = 0.0
+            else:
+                edge_data_copy.setdefault("weight", 0.0)
+
             edges_params.append({
                 "source_id": source_id,
                 "target_id": target_id,
@@ -584,6 +601,30 @@ class Neo4jStorage(BaseGraphStorage):
                 logger.info(
                     f"Performed graph clustering with {community_count} communities and modularities {modularities}"
                 )
+
+                # Retrieve the node->community mapping
+                mapping_result = await session.run(
+                    f"""
+                    MATCH (n:`{self.namespace}`)
+                    WHERE n.communityIds IS NOT NULL
+                    RETURN n.id AS nodeId, n.communityIds[-1] AS communityId
+                    """
+                )
+
+                # Build communities dictionary
+                communities = {}
+                async for record in mapping_result:
+                    node_id = record["nodeId"]
+                    # The last element of communityIds is the final community
+                    community_id = int(record["communityId"])
+                    communities[node_id] = community_id
+
+                # Return clustering results in expected format
+                return {
+                    "communities": communities,
+                    "community_count": community_count,
+                    "modularities": modularities
+                }
             except Exception as e:
                 logger.error(f"Error during GDS clustering: {e}")
                 raise
