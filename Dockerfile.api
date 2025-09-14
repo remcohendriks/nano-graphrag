@@ -1,0 +1,39 @@
+# FastAPI Docker image for nano-graphrag
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install FastAPI dependencies
+RUN pip install --no-cache-dir \
+    fastapi>=0.115.0 \
+    uvicorn[standard]>=0.30.0 \
+    pydantic>=2.0.0 \
+    pydantic-settings>=2.0.0 \
+    httpx>=0.27.0
+
+# Copy application code
+COPY nano_graphrag /app/nano_graphrag
+COPY api_server.py /app/
+
+# Create working directory for GraphRAG
+RUN mkdir -p /app/api_working_dir
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8000/api/v1/health/live')"
+
+# Run the application
+CMD ["uvicorn", "nano_graphrag.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
