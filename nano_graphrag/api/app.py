@@ -7,6 +7,7 @@ import logging
 
 from nano_graphrag import GraphRAG
 from nano_graphrag.config import GraphRAGConfig, StorageConfig
+import dataclasses
 from .config import settings
 from .routers import documents, query, health, management
 from .exceptions import StorageUnavailableError
@@ -19,7 +20,10 @@ async def lifespan(app: FastAPI):
     """Manage GraphRAG lifecycle."""
     logger.info("Initializing GraphRAG...")
 
-    # Build storage config from settings
+    # Start with complete GraphRAG config from environment
+    config = GraphRAGConfig.from_env()
+
+    # Build storage config override from API settings
     storage_config = StorageConfig(
         working_dir=settings.working_dir,
         graph_backend=settings.graph_backend,
@@ -27,7 +31,7 @@ async def lifespan(app: FastAPI):
         kv_backend=settings.kv_backend,
     )
 
-    # Add backend-specific configurations
+    # Add backend-specific configurations from API settings
     if settings.neo4j_url:
         storage_config.neo4j_url = settings.neo4j_url
         storage_config.neo4j_username = settings.neo4j_username
@@ -42,8 +46,8 @@ async def lifespan(app: FastAPI):
         storage_config.redis_url = settings.redis_url
         storage_config.redis_password = settings.redis_password
 
-    # Create GraphRAG config
-    config = GraphRAGConfig(storage=storage_config)
+    # Replace only storage config, keeping LLM/embedding/query from env
+    config = dataclasses.replace(config, storage=storage_config)
 
     # Initialize GraphRAG
     try:

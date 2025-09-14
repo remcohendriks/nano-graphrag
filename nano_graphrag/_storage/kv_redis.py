@@ -218,6 +218,17 @@ class RedisKVStorage(BaseKVStorage):
         # Return keys that don't exist (result is 0)
         return {key for key, exists in zip(data, results) if not exists}
 
+    async def delete_by_id(self, id: str) -> bool:
+        """Delete a single item by ID. Returns True if deleted, False if not found."""
+        await self._ensure_initialized()
+
+        try:
+            result = await self._redis_client.delete(self._get_key(id))
+            return result > 0  # Redis delete returns number of keys deleted
+        except RedisError as e:
+            logger.error(f"Redis delete error for {id}: {e}")
+            raise
+
     async def drop(self) -> None:
         """Clear all keys in namespace."""
         await self._ensure_initialized()

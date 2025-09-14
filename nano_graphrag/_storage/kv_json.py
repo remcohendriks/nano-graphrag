@@ -42,5 +42,13 @@ class JsonKVStorage(BaseKVStorage):
     async def upsert(self, data: dict[str, dict]):
         self._data.update(data)
 
+    async def delete_by_id(self, id: str) -> bool:
+        """Delete a single item by ID. Returns True if deleted, False if not found."""
+        if id in self._data:
+            del self._data[id]
+            write_json(self._data, self._file_name)
+            return True
+        return False
+
     async def drop(self):
         self._data = {}

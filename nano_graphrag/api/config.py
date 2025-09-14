@@ -1,7 +1,9 @@
 """Configuration for FastAPI application."""
 
 from pydantic_settings import BaseSettings
-from typing import List, Optional
+from pydantic import validator
+from typing import List, Optional, Union
+import json
 
 
 class Settings(BaseSettings):
@@ -9,7 +11,21 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     api_title: str = "nano-graphrag API"
     api_version: str = "1.0.0"
-    allowed_origins: List[str] = ["*"]
+    allowed_origins: Union[str, List[str]] = ["*"]
+
+    @validator('allowed_origins', pre=True)
+    def parse_allowed_origins(cls, v):
+        """Parse allowed_origins from string or list."""
+        if isinstance(v, str):
+            # If it's a JSON array string, parse it
+            if v.startswith('['):
+                try:
+                    return json.loads(v)
+                except json.JSONDecodeError:
+                    return [v]
+            # Single origin string
+            return [v]
+        return v
 
     # Performance
     max_query_timeout: int = 300  # 5 minutes
