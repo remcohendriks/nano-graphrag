@@ -1,5 +1,39 @@
 [
   {
+    "timestamp": "2025-09-14T14:45:18.386734+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "passed",
+    "timings": {
+      "insert": 59.551270961761475,
+      "global_query": 27.82999873161316,
+      "local_query": 9.211618900299072,
+      "naive_query": 0.44926905632019043,
+      "reload": 6.6462578773498535,
+      "total": 104.62075805664062
+    },
+    "counts": {
+      "nodes": 96,
+      "edges": 106,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
     "timestamp": "2025-09-14T13:47:09.555919+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",

@@ -283,18 +283,15 @@ async def test_graphrag_with_redis_backend(temp_working_dir, mock_providers):
     mock_redis_module.ConnectionPool.from_url.return_value = mock_pool
     mock_redis_module.Redis.return_value = mock_redis_client
 
-    # Temporarily add to sys.modules
-    original_modules = {}
-    for module_name in ['redis.asyncio', 'redis.backoff', 'redis.retry', 'redis.exceptions']:
-        original_modules[module_name] = sys.modules.get(module_name)
-        sys.modules[module_name] = MagicMock()
-
-    sys.modules['redis.asyncio'] = mock_redis_module
-
-    try:
-        with patch('nano_graphrag._storage.kv_redis.REDIS_AVAILABLE', True), \
-             patch('nano_graphrag.graphrag.get_llm_provider') as mock_get_llm, \
-             patch('nano_graphrag.graphrag.get_embedding_provider') as mock_get_embed:
+    # Use patch.dict for proper cleanup
+    with patch.dict(sys.modules, {
+        'redis.asyncio': mock_redis_module,
+        'redis.backoff': MagicMock(),
+        'redis.retry': MagicMock(),
+        'redis.exceptions': MagicMock()
+    }), patch('nano_graphrag._storage.kv_redis.REDIS_AVAILABLE', True), \
+         patch('nano_graphrag.graphrag.get_llm_provider') as mock_get_llm, \
+         patch('nano_graphrag.graphrag.get_embedding_provider') as mock_get_embed:
 
             mock_get_llm.return_value = llm_provider
             mock_get_embed.return_value = embedding_provider
@@ -344,11 +341,3 @@ async def test_graphrag_with_redis_backend(temp_working_dir, mock_providers):
 
             # The llm_response_cache namespace should have TTL
             assert llm_cache_storage._ttl_config.get("llm_response_cache", 0) > 0
-
-    finally:
-        # Restore original modules
-        for module_name, original in original_modules.items():
-            if original is None:
-                sys.modules.pop(module_name, None)
-            else:
-                sys.modules[module_name] = original

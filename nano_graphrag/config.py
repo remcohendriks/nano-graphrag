@@ -355,6 +355,15 @@ class GraphRAGConfig:
             config_dict['qdrant_api_key'] = self.storage.qdrant_api_key
             config_dict['qdrant_collection_params'] = self.storage.qdrant_collection_params
         
+        # Add Redis configuration if using Redis backend
+        if self.storage.kv_backend == "redis":
+            config_dict['redis_url'] = self.storage.redis_url
+            config_dict['redis_password'] = self.storage.redis_password
+            config_dict['redis_max_connections'] = self.storage.redis_max_connections
+            config_dict['redis_connection_timeout'] = self.storage.redis_connection_timeout
+            config_dict['redis_socket_timeout'] = self.storage.redis_socket_timeout
+            config_dict['redis_health_check_interval'] = self.storage.redis_health_check_interval
+
         # Add Neo4j configuration if using Neo4j backend
         if self.storage.graph_backend == "neo4j":
             config_dict['addon_params'] = {

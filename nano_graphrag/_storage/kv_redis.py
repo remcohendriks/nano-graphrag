@@ -102,7 +102,12 @@ class RedisKVStorage(BaseKVStorage):
         # Override with environment variables if set
         for namespace, default_ttl in defaults.items():
             env_key = f"REDIS_TTL_{namespace.upper()}"
-            self._ttl_config[namespace] = int(os.getenv(env_key, default_ttl))
+            ttl_value = int(os.getenv(env_key, default_ttl))
+            # Validate TTL - must be non-negative
+            if ttl_value < 0:
+                logger.warning(f"Invalid TTL {ttl_value} for {namespace}, using 0 (no expiry)")
+                ttl_value = 0
+            self._ttl_config[namespace] = ttl_value
 
     def _get_key(self, id: str) -> str:
         """Generate Redis key with namespace prefix."""

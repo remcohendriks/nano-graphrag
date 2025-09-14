@@ -20,15 +20,16 @@ class TestRedisKVContract(BaseKVStorageTestSuite):
             "redis_health_check_interval": 30
         }
 
-        # Patch at module level before import
+        # Use patch.dict to properly manage sys.modules cleanup
         import sys
         mock_redis_module = MagicMock()
-        sys.modules['redis.asyncio'] = mock_redis_module
-        sys.modules['redis.backoff'] = MagicMock()
-        sys.modules['redis.retry'] = MagicMock()
-        sys.modules['redis.exceptions'] = MagicMock()
 
-        with patch('nano_graphrag._storage.kv_redis.REDIS_AVAILABLE', True):
+        with patch.dict(sys.modules, {
+            'redis.asyncio': mock_redis_module,
+            'redis.backoff': MagicMock(),
+            'redis.retry': MagicMock(),
+            'redis.exceptions': MagicMock()
+        }), patch('nano_graphrag._storage.kv_redis.REDIS_AVAILABLE', True):
 
             # Mock Redis client
             mock_client = AsyncMock()
