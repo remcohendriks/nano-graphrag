@@ -23,10 +23,30 @@ services:
     networks:
       - nano-graphrag-network
 
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: nano-graphrag-redisinsight
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight_data:/data
+    environment:
+      # RedisInsight environment variables
+      REDIS_INSIGHT_PORT: "5540"
+      REDIS_INSIGHT_HOST: "0.0.0.0"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - nano-graphrag-network
+
 volumes:
   redis_data:
     driver: local
   redis_config:
+    driver: local
+  redisinsight_data:
     driver: local
 
 networks:

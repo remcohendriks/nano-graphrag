@@ -1,5 +1,74 @@
 [
   {
+    "timestamp": "2025-09-14T13:47:09.555919+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "passed",
+    "timings": {
+      "insert": 234.69019436836243,
+      "global_query": 26.619214057922363,
+      "local_query": 11.534571886062622,
+      "naive_query": 8.499242067337036,
+      "reload": 7.52216100692749,
+      "total": 289.5486650466919
+    },
+    "counts": {
+      "nodes": 96,
+      "edges": 106,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-14T13:44:24.101986+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "global_query": 0.04175591468811035,
+      "local_query": 1.1083781719207764,
+      "naive_query": 1.0758190155029297,
+      "reload": 0.06050610542297363,
+      "total": 3.11682391166687
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: AbstractConnection.__init__() got an unexpected keyword argument 'connection_timeout'"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "failed",
+      "local_query": "failed",
+      "naive_query": "failed",
+      "reload": "passed"
+    }
+  },
+  {
     "timestamp": "2025-09-13T21:08:09.372489+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",

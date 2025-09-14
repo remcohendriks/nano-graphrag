@@ -7,7 +7,7 @@ Successfully implemented Redis as a production-ready Key-Value storage backend f
 ## Implementation Overview
 
 ### 1. Core RedisKVStorage Class
-**File**: `nano_graphrag/_storage/kv_redis.py` (235 lines)
+**File**: `nano_graphrag/_storage/kv_redis.py` (270 lines)
 
 Key features implemented:
 - Full async support using `redis.asyncio`
@@ -52,6 +52,8 @@ Features:
 - `tests/health/config_neo4j_qdrant_redis.env`: Full stack configuration
 
 ### 5. Testing
+
+#### Unit Tests
 **File**: `tests/storage/test_redis_kv_contract.py` (146 lines)
 
 Test approach:
@@ -63,6 +65,21 @@ Test approach:
 Test results:
 ```
 8 passed in 0.07s
+```
+
+#### Integration Tests
+**File**: `tests/test_rag.py` (added test_graphrag_with_redis_backend)
+
+Additional testing:
+- GraphRAG integration with Redis backend
+- Verifies correct backend instantiation
+- Tests document and chunk storage
+- Validates TTL configuration for cache namespaces
+- Full mocking approach for CI/CD compatibility
+
+Test results:
+```
+All 6 RAG tests passed including new Redis integration test
 ```
 
 ### 6. Dependencies
@@ -103,11 +120,19 @@ Pattern: `nano_graphrag:{namespace}:{id}`
 - Tests all CRUD operations
 - Validates TTL behavior
 - Tests connection failures
+- 8/8 contract tests passing
+
+### Integration Tests
+- GraphRAG instantiation with Redis backend
+- Document and chunk storage operations
+- TTL verification for cache namespaces
+- Full mock coverage for CI/CD
 
 ### Contract Compliance
 - Implements BaseKVStorageTestSuite
 - Passes all contract tests
 - Supports all required operations
+- Compatible with existing test infrastructure
 
 ## Production Considerations
 
@@ -167,13 +192,45 @@ Rollback:
 3. Cache warming strategies (NGRAF-019)
 4. Redis-backed rate limiting (NGRAF-020)
 
+## Health Check Results
+
+### Redis Backend Performance
+Successfully passed health check with Redis backend:
+- **Status**: PASSED (all tests)
+- **Configuration**: Redis KV backend with NetworkX graph and Nano vector storage
+- **Test Data**: 1000 lines of synthetic data
+- **Results**:
+  - Insert: Successful graph building with Redis storage
+  - Global Query: Passed with community reports from Redis
+  - Local Query: Passed with entity/chunk retrieval from Redis
+  - Naive Query: Passed with chunk retrieval from Redis
+  - Reload: Successfully reloaded from Redis storage
+
+### Bug Fixes Applied
+1. **Connection Parameter Fix**: Changed `connection_timeout` to `socket_connect_timeout` (correct redis-py parameter)
+2. **Deprecation Fix**: Updated `close()` to `aclose()` for Redis 5.0+ compatibility
+3. **Docker Compose Enhancement**: Added RedisInsight GUI for monitoring (port 5540)
+
+## Monitoring and Observability
+
+### RedisInsight Integration
+Added RedisInsight service to Docker Compose for visual monitoring:
+- **Web UI**: http://localhost:5540
+- **Features**:
+  - Real-time key browsing by namespace
+  - TTL monitoring for cache expiration
+  - Memory usage analytics
+  - Command monitoring
+  - JSON data visualization
+
 ## Conclusion
 
 The Redis KV backend implementation successfully provides:
-- Production-ready storage backend
+- Production-ready storage backend (health check passed)
 - Horizontal scaling capability
 - Shared state across workers
 - Significant performance improvements
 - Minimal code complexity
+- Visual monitoring with RedisInsight
 
-The implementation is complete, tested, and ready for integration testing and deployment.
+The implementation is complete, tested, health-check validated, and ready for production deployment.

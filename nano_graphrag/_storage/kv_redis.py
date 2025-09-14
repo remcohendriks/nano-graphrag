@@ -66,8 +66,8 @@ class RedisKVStorage(BaseKVStorage):
             self.redis_url,
             password=self.redis_password,
             max_connections=self.max_connections,
+            socket_connect_timeout=self.connection_timeout,  # Use socket_connect_timeout
             socket_timeout=self.socket_timeout,
-            connection_timeout=self.connection_timeout,
             decode_responses=False,  # Handle bytes for flexibility
             retry=retry,
             health_check_interval=self.health_check_interval
@@ -272,6 +272,6 @@ class RedisKVStorage(BaseKVStorage):
     async def _cleanup(self):
         """Async cleanup of Redis connections."""
         if self._redis_client:
-            await self._redis_client.close()
+            await self._redis_client.aclose()  # Use aclose instead of close
         if self._connection_pool:
             await self._connection_pool.disconnect()
