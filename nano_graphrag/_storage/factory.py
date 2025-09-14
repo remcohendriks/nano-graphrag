@@ -14,7 +14,7 @@ class StorageFactory:
     # Maintain current restrictions from StorageConfig
     ALLOWED_VECTOR = {"nano", "hnswlib", "qdrant"}
     ALLOWED_GRAPH = {"networkx", "neo4j"}
-    ALLOWED_KV = {"json"}
+    ALLOWED_KV = {"json", "redis"}
     
     @classmethod
     def register_vector(cls, name: str, backend_loader: Callable[[], Type[BaseVectorStorage]]) -> None:
@@ -221,6 +221,12 @@ def _get_qdrant_storage():
     return QdrantVectorStorage
 
 
+def _get_redis_storage():
+    """Lazy loader for Redis KV storage."""
+    from .kv_redis import RedisKVStorage
+    return RedisKVStorage
+
+
 def _register_backends():
     """Register built-in backends with lazy loaders. Called when factory is first used."""
     # Register vector backends if not already registered
@@ -237,3 +243,4 @@ def _register_backends():
     # Register KV backends if not already registered
     if not StorageFactory._kv_backends:
         StorageFactory.register_kv("json", _get_json_storage)
+        StorageFactory.register_kv("redis", _get_redis_storage)

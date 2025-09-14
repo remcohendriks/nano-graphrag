@@ -113,7 +113,15 @@ class StorageConfig:
     neo4j_encrypted: bool = False  # Default to False, will be inferred from URL
     neo4j_max_transaction_retry_time: float = 30.0
     neo4j_batch_size: int = 1000  # Batch size for bulk operations
-    
+
+    # Redis specific settings
+    redis_url: str = "redis://localhost:6379"
+    redis_password: Optional[str] = None
+    redis_max_connections: int = 50
+    redis_connection_timeout: float = 5.0
+    redis_socket_timeout: float = 5.0
+    redis_health_check_interval: int = 30
+
     # Node2Vec configuration (for NetworkX backend)
     node2vec: Node2VecConfig = field(default_factory=lambda: Node2VecConfig(enabled=True))
     
@@ -156,7 +164,13 @@ class StorageConfig:
             neo4j_connection_timeout=float(os.getenv("NEO4J_CONNECTION_TIMEOUT", "30.0")),
             neo4j_encrypted=neo4j_encrypted,
             neo4j_max_transaction_retry_time=float(os.getenv("NEO4J_MAX_TRANSACTION_RETRY_TIME", "30.0")),
-            neo4j_batch_size=int(os.getenv("NEO4J_BATCH_SIZE", "1000"))
+            neo4j_batch_size=int(os.getenv("NEO4J_BATCH_SIZE", "1000")),
+            redis_url=os.getenv("REDIS_URL", "redis://localhost:6379"),
+            redis_password=os.getenv("REDIS_PASSWORD", None),
+            redis_max_connections=int(os.getenv("REDIS_MAX_CONNECTIONS", "50")),
+            redis_connection_timeout=float(os.getenv("REDIS_CONNECTION_TIMEOUT", "5.0")),
+            redis_socket_timeout=float(os.getenv("REDIS_SOCKET_TIMEOUT", "5.0")),
+            redis_health_check_interval=int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30"))
         )
     
     def __post_init__(self):
@@ -164,7 +178,7 @@ class StorageConfig:
         # Only allow implemented backends
         valid_vector_backends = {"nano", "hnswlib", "qdrant"}
         valid_graph_backends = {"networkx", "neo4j"}
-        valid_kv_backends = {"json"}
+        valid_kv_backends = {"json", "redis"}
         
         if self.vector_backend not in valid_vector_backends:
             raise ValueError(f"Unknown vector backend: {self.vector_backend}. Available: {valid_vector_backends}")
