@@ -72,7 +72,11 @@ async def query_stream(
     request: QueryRequest,
     graphrag: GraphRAG = Depends(get_graphrag)
 ) -> StreamingResponse:
-    """Stream query results using Server-Sent Events."""
+    """Stream query results using Server-Sent Events.
+
+    NOTE: This is simulated streaming for demonstration purposes.
+    Real streaming requires changes to the core GraphRAG aquery method.
+    """
 
     async def generate() -> AsyncGenerator[str, None]:
         start_time = time.time()
@@ -80,17 +84,30 @@ async def query_stream(
         # Send initial event
         yield f"data: {json.dumps({'event': 'start', 'mode': request.mode.value})}\n\n"
 
-        # Build parameters
+        # Build parameters with same validation as non-streaming endpoint
         param = QueryParam(mode=request.mode.value)
+
+        # Apply custom parameters - only allowed ones
         if request.params:
             for key, value in request.params.items():
-                if hasattr(param, key):
-                    setattr(param, key, value)
+                if key in ALLOWED_QUERY_PARAMS and hasattr(param, key):
+                    try:
+                        setattr(param, key, value)
+                    except (TypeError, ValueError) as e:
+                        logger.warning(f"Invalid parameter {key}={value}: {e}")
 
-        # Execute query
-        answer = await graphrag.aquery(request.question, param=param)
+        # Execute query with error handling for disabled modes
+        try:
+            answer = await graphrag.aquery(request.question, param=param)
+        except ValueError as e:
+            # Handle disabled naive mode or other value errors
+            if "enable_naive_rag" in str(e):
+                yield f"data: {json.dumps({'event': 'error', 'message': 'Naive mode is not enabled. Set QUERY_ENABLE_NAIVE_RAG=true to enable it.'})}\n\n"
+                return
+            yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
+            return
 
-        # Stream the answer in chunks
+        # Stream the answer in chunks (simulated streaming)
         chunk_size = 50  # characters per chunk
         for i in range(0, len(answer), chunk_size):
             chunk = answer[i:i + chunk_size]
