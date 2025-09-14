@@ -212,10 +212,11 @@ class HealthCheck:
             start_time = time.time()
             
             print("Starting async insert task...")
-            # Add longer timeout for GPT-5 models
+            # Get timeout from environment or use default
+            insert_timeout = int(os.environ.get("HEALTH_CHECK_INSERT_TIMEOUT", "600"))  # Default 10 minutes
             insert_task = asyncio.create_task(graph.ainsert(text))
-            print("Waiting for insert to complete (600s timeout)...")
-            await asyncio.wait_for(insert_task, timeout=600)  # 10 minute timeout
+            print(f"Waiting for insert to complete ({insert_timeout}s timeout)...")
+            await asyncio.wait_for(insert_task, timeout=insert_timeout)
             print("Insert task completed!")
             
             artifacts = [
@@ -488,8 +489,10 @@ class HealthCheck:
             print(f"Tests passed: {passed}/{total}")
             print(f"Total time: {total_time:.1f} seconds ({total_time/60:.1f} minutes)")
             
-            if total_time > 600:
-                print("⚠️  Warning: Runtime exceeded 10 minutes")
+            # Get warning threshold from environment or use default
+            runtime_warning_threshold = int(os.environ.get("HEALTH_CHECK_RUNTIME_WARNING", "600"))  # Default 10 minutes
+            if total_time > runtime_warning_threshold:
+                print(f"⚠️  Warning: Runtime exceeded {runtime_warning_threshold/60:.1f} minutes")
             
             success = passed == total
             self.results["status"] = "passed" if success else "failed"
@@ -536,25 +539,25 @@ class HealthCheck:
             if os.environ.get("STORAGE_VECTOR_BACKEND") == "qdrant":
                 try:
                     from qdrant_client import QdrantClient
-                    
+
                     qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
                     qdrant_api_key = os.environ.get("QDRANT_API_KEY", None)
-                    
+
                     # Use synchronous client for cleanup to avoid event loop issues
                     client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
-                    
+
                     # Get the namespace prefix
                     namespace_prefix = os.environ.get("QDRANT_NAMESPACE_PREFIX")
                     if not namespace_prefix:
                         # Use working directory basename as prefix
                         namespace_prefix = self.working_dir.name
-                    
+
                     # Delete collections with our namespace prefix
                     collections_to_delete = [
                         f"{namespace_prefix}_entities",
                         f"{namespace_prefix}_chunks"
                     ]
-                    
+
                     deleted_count = 0
                     for collection_name in collections_to_delete:
                         try:
@@ -565,15 +568,59 @@ class HealthCheck:
                                 deleted_count += 1
                         except Exception as e:
                             print(f"Warning: Could not delete Qdrant collection {collection_name}: {e}")
-                    
+
                     if deleted_count > 0:
                         print(f"\n🧹 Cleaned up Qdrant: {deleted_count} collections deleted")
-                    
+
                     client.close()
-                    
+
                 except Exception as e:
                     print(f"Warning: Could not clean up Qdrant: {e}")
-            
+
+            # Clean up Redis if we're using it
+            if os.environ.get("STORAGE_KV_BACKEND") == "redis":
+                try:
+                    import redis
+
+                    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+                    redis_password = os.environ.get("REDIS_PASSWORD", None)
+
+                    # Use synchronous client for cleanup
+                    client = redis.from_url(redis_url, password=redis_password, decode_responses=False)
+
+                    # Get all keys with nano_graphrag prefix for all namespaces
+                    # Common namespaces used in nano-graphrag
+                    namespaces = ["full_docs", "text_chunks", "community_reports", "llm_response_cache"]
+
+                    total_deleted = 0
+                    for namespace in namespaces:
+                        # Pattern: nano_graphrag:{namespace}:*
+                        pattern = f"nano_graphrag:{namespace}:*"
+
+                        # Use SCAN to avoid blocking Redis
+                        cursor = 0
+                        keys_to_delete = []
+                        while True:
+                            cursor, keys = client.scan(cursor, match=pattern, count=100)
+                            keys_to_delete.extend(keys)
+                            if cursor == 0:
+                                break
+
+                        # Delete keys in batches
+                        if keys_to_delete:
+                            for i in range(0, len(keys_to_delete), 1000):
+                                batch = keys_to_delete[i:i+1000]
+                                deleted = client.delete(*batch)
+                                total_deleted += deleted
+
+                    if total_deleted > 0:
+                        print(f"\n🧹 Cleaned up Redis: {total_deleted} keys deleted")
+
+                    client.close()
+
+                except Exception as e:
+                    print(f"Warning: Could not clean up Redis: {e}")
+
             # Keep persistent directory by default
             self.cleanup(keep_persistent=True)
 
@@ -597,8 +644,7 @@ def print_history_summary():
         if history:
             # Summary stats
             passed = sum(1 for run in history if run.get("status") == "passed")
-            failed = sum(1 for run in history if run.get("status") == "failed")
-            
+
             print(f"Success rate: {passed}/{len(history)} ({passed*100//len(history)}%)")
             
             # Show last 5 runs

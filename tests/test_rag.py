@@ -212,3 +212,142 @@ def test_backward_compatibility():
     # This test ensures we don't break existing code
     # Can be removed in future versions
     pass
+
+
+@pytest.mark.asyncio
+async def test_graphrag_with_redis_backend(temp_working_dir, mock_providers):
+    """Test GraphRAG with Redis KV backend."""
+    llm_provider, embedding_provider = mock_providers
+
+    from unittest.mock import MagicMock
+
+    # Create mock Redis client and pool
+    mock_redis_module = MagicMock()
+    mock_redis_client = AsyncMock()
+    mock_pool = MagicMock()
+
+    # Mock Redis operations
+    redis_data = {}
+
+    async def mock_get(key):
+        return redis_data.get(key, None)
+
+    async def mock_set(key, value):
+        redis_data[key] = value
+        return True
+
+    mock_redis_client.ping = AsyncMock(return_value=True)
+    mock_redis_client.get = AsyncMock(side_effect=mock_get)
+    mock_redis_client.set = AsyncMock(side_effect=mock_set)
+    mock_redis_client.setex = AsyncMock(side_effect=lambda k, t, v: mock_set(k, v))
+    mock_redis_client.exists = AsyncMock(side_effect=lambda k: 1 if k in redis_data else 0)
+    mock_redis_client.scan_iter = AsyncMock(return_value=[]).__aiter__
+    mock_redis_client.bgsave = AsyncMock(return_value=True)
+
+    # Mock pipeline
+    class MockPipeline:
+        def __init__(self):
+            self.commands = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def get(self, key):
+            self.commands.append(('get', key))
+            return self
+
+        def set(self, key, value):
+            redis_data[key] = value
+            return self
+
+        def setex(self, key, ttl, value):
+            redis_data[key] = value
+            return self
+
+        async def execute(self):
+            results = []
+            for cmd in self.commands:
+                if cmd[0] == 'get':
+                    results.append(redis_data.get(cmd[1], None))
+            self.commands.clear()
+            return results
+
+    mock_redis_client.pipeline = MagicMock(return_value=MockPipeline())
+    mock_redis_client.aclose = AsyncMock()
+
+    # Setup mock Redis module
+    mock_redis_module.ConnectionPool.from_url.return_value = mock_pool
+    mock_redis_module.Redis.return_value = mock_redis_client
+
+    # Create proper exception classes
+    class MockRedisError(Exception):
+        pass
+
+    class MockRedisConnectionError(MockRedisError):
+        pass
+
+    # Mock retry and backoff
+    mock_retry = MagicMock()
+    mock_backoff = MagicMock()
+
+    # Patch the imported symbols directly in kv_redis module
+    with patch('nano_graphrag._storage.kv_redis.REDIS_AVAILABLE', True), \
+         patch('nano_graphrag._storage.kv_redis.aioredis', mock_redis_module), \
+         patch('nano_graphrag._storage.kv_redis.ExponentialBackoff', mock_backoff), \
+         patch('nano_graphrag._storage.kv_redis.Retry', mock_retry), \
+         patch('nano_graphrag._storage.kv_redis.RedisError', MockRedisError), \
+         patch('nano_graphrag._storage.kv_redis.RedisConnectionError', MockRedisConnectionError), \
+         patch('nano_graphrag.graphrag.get_llm_provider') as mock_get_llm, \
+         patch('nano_graphrag.graphrag.get_embedding_provider') as mock_get_embed:
+
+            mock_get_llm.return_value = llm_provider
+            mock_get_embed.return_value = embedding_provider
+
+            # Create config with Redis backend
+            config = GraphRAGConfig(
+                storage=StorageConfig(
+                    working_dir=temp_working_dir,
+                    kv_backend="redis",
+                    redis_url="redis://localhost:6379"
+                ),
+                query=QueryConfig(enable_naive_rag=True)
+            )
+
+            # Initialize GraphRAG with Redis backend
+            rag = GraphRAG(config=config)
+
+            # Verify Redis backend is being used
+            from nano_graphrag._storage.kv_redis import RedisKVStorage
+            assert isinstance(rag.full_docs, RedisKVStorage)
+            assert isinstance(rag.text_chunks, RedisKVStorage)
+            assert isinstance(rag.community_reports, RedisKVStorage)
+
+            # Test basic operations
+            test_doc = {"content": "Test document for Redis backend"}
+            await rag.full_docs.upsert({"doc1": test_doc})
+
+            # Verify data was stored
+            result = await rag.full_docs.get_by_id("doc1")
+            assert result is not None
+            assert result["content"] == test_doc["content"]
+
+            # Test chunk storage
+            test_chunk = {"content": "Test chunk", "source_id": "doc1"}
+            await rag.text_chunks.upsert({"chunk1": test_chunk})
+
+            result = await rag.text_chunks.get_by_id("chunk1")
+            assert result is not None
+            assert result["content"] == test_chunk["content"]
+
+            # Verify Redis client was used
+            assert mock_redis_client.ping.called
+
+            # Test LLM cache with TTL (should use setex)
+            llm_cache_storage = rag.llm_response_cache
+            assert isinstance(llm_cache_storage, RedisKVStorage)
+
+            # The llm_response_cache namespace should have TTL
+            assert llm_cache_storage._ttl_config.get("llm_response_cache", 0) > 0

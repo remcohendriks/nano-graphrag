@@ -246,7 +246,7 @@ class TestStorageFactory:
         
         assert mock_vector.call_count == 3  # nano, hnswlib, and qdrant
         assert mock_graph.call_count == 2   # networkx and neo4j
-        assert mock_kv.call_count == 1      # json
+        assert mock_kv.call_count == 2      # json and redis
         
         # Reset mocks
         mock_vector.reset_mock()

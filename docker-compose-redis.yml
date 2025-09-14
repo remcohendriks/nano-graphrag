@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: nano-graphrag-redis
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    environment:
+      # Redis configuration via environment variables
+      REDIS_ARGS: "--appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru"
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - redis_config:/usr/local/etc/redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - nano-graphrag-network
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: nano-graphrag-redisinsight
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight_data:/data
+    environment:
+      # RedisInsight environment variables
+      REDIS_INSIGHT_PORT: "5540"
+      REDIS_INSIGHT_HOST: "0.0.0.0"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - nano-graphrag-network
+
+volumes:
+  redis_data:
+    driver: local
+  redis_config:
+    driver: local
+  redisinsight_data:
+    driver: local
+
+networks:
+  nano-graphrag-network:
+    driver: bridge
+    name: nano-graphrag-network

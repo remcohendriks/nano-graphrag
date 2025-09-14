@@ -136,8 +136,9 @@ class TestStorageConfig:
         with pytest.raises(ValueError, match="Unknown graph backend"):
             StorageConfig(graph_backend="dgraph")  # Invalid backend
 
-        with pytest.raises(ValueError, match="Unknown KV backend"):
-            StorageConfig(kv_backend="redis")
+        # Redis is now a valid backend
+        config = StorageConfig(kv_backend="redis")
+        assert config.kv_backend == "redis"
 
 
 class TestChunkingConfig:
