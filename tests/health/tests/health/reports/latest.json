@@ -1,5 +1,74 @@
 [
   {
+    "timestamp": "2025-09-14T15:26:13.724229+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "global_query": 0.07533097267150879,
+      "local_query": 12.00353193283081,
+      "naive_query": 10.36757516860962,
+      "reload": 0.0643308162689209,
+      "total": 623.1762099266052
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: "
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "failed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-14T15:16:07.941068+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "passed",
+    "timings": {
+      "insert": 63.26649498939514,
+      "global_query": 22.337738037109375,
+      "local_query": 12.749712705612183,
+      "naive_query": 0.39371275901794434,
+      "reload": 7.41359806060791,
+      "total": 106.79876899719238
+    },
+    "counts": {
+      "nodes": 96,
+      "edges": 106,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "passed",
+      "reload": "passed"
+    }
+  },
+  {
     "timestamp": "2025-09-14T14:45:18.386734+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",
