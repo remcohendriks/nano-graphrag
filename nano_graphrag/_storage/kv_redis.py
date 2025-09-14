@@ -3,7 +3,7 @@
 import os
 import json
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 import asyncio
 import logging
 
@@ -152,7 +152,7 @@ class RedisKVStorage(BaseKVStorage):
             logger.error(f"Redis get error for {id}: {e}")
             raise
 
-    async def get_by_ids(self, ids: List[str], fields: Optional[List[str]] = None) -> List[Optional[Any]]:
+    async def get_by_ids(self, ids: List[str], fields: Union[set[str], None] = None) -> List[Optional[Any]]:
         """Get multiple items by IDs with optional field filtering."""
         if not ids:
             return []

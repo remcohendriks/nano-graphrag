@@ -20,24 +20,34 @@ class TestRedisKVContract(BaseKVStorageTestSuite):
             "redis_health_check_interval": 30
         }
 
-        # Use patch.dict to properly manage sys.modules cleanup
-        import sys
+        # Mock Redis client and pool
+        mock_client = AsyncMock()
+        mock_pool = MagicMock()
         mock_redis_module = MagicMock()
 
-        with patch.dict(sys.modules, {
-            'redis.asyncio': mock_redis_module,
-            'redis.backoff': MagicMock(),
-            'redis.retry': MagicMock(),
-            'redis.exceptions': MagicMock()
-        }), patch('nano_graphrag._storage.kv_redis.REDIS_AVAILABLE', True):
+        # Setup mock Redis module
+        mock_redis_module.ConnectionPool.from_url.return_value = mock_pool
+        mock_redis_module.Redis.return_value = mock_client
 
-            # Mock Redis client
-            mock_client = AsyncMock()
-            mock_pool = MagicMock()
+        # Create proper exception classes for Redis
+        class MockRedisError(Exception):
+            pass
 
-            # Setup mock Redis module
-            mock_redis_module.ConnectionPool.from_url.return_value = mock_pool
-            mock_redis_module.Redis.return_value = mock_client
+        class MockRedisConnectionError(MockRedisError):
+            pass
+
+        # Mock retry and backoff
+        mock_retry = MagicMock()
+        mock_backoff = MagicMock()
+
+        # Patch the imported symbols directly in kv_redis module
+        with patch('nano_graphrag._storage.kv_redis.REDIS_AVAILABLE', True), \
+             patch('nano_graphrag._storage.kv_redis.aioredis', mock_redis_module), \
+             patch('nano_graphrag._storage.kv_redis.ExponentialBackoff', mock_backoff), \
+             patch('nano_graphrag._storage.kv_redis.Retry', mock_retry), \
+             patch('nano_graphrag._storage.kv_redis.RedisError', MockRedisError), \
+             patch('nano_graphrag._storage.kv_redis.RedisConnectionError', MockRedisConnectionError):
+
 
             # Storage for mock data
             mock_data = {}
@@ -129,6 +139,7 @@ class TestRedisKVContract(BaseKVStorageTestSuite):
             mock_client.pipeline = MagicMock(return_value=MockPipeline())
 
             mock_client.close = AsyncMock()
+            mock_client.aclose = AsyncMock()
 
             # Import after patching
             from nano_graphrag._storage.kv_redis import RedisKVStorage

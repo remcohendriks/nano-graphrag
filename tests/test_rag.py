@@ -219,11 +219,9 @@ async def test_graphrag_with_redis_backend(temp_working_dir, mock_providers):
     """Test GraphRAG with Redis KV backend."""
     llm_provider, embedding_provider = mock_providers
 
-    # Mock redis module availability
-    import sys
     from unittest.mock import MagicMock
 
-    # Create mock Redis modules
+    # Create mock Redis client and pool
     mock_redis_module = MagicMock()
     mock_redis_client = AsyncMock()
     mock_pool = MagicMock()
@@ -278,18 +276,30 @@ async def test_graphrag_with_redis_backend(temp_working_dir, mock_providers):
             return results
 
     mock_redis_client.pipeline = MagicMock(return_value=MockPipeline())
+    mock_redis_client.aclose = AsyncMock()
 
     # Setup mock Redis module
     mock_redis_module.ConnectionPool.from_url.return_value = mock_pool
     mock_redis_module.Redis.return_value = mock_redis_client
 
-    # Use patch.dict for proper cleanup
-    with patch.dict(sys.modules, {
-        'redis.asyncio': mock_redis_module,
-        'redis.backoff': MagicMock(),
-        'redis.retry': MagicMock(),
-        'redis.exceptions': MagicMock()
-    }), patch('nano_graphrag._storage.kv_redis.REDIS_AVAILABLE', True), \
+    # Create proper exception classes
+    class MockRedisError(Exception):
+        pass
+
+    class MockRedisConnectionError(MockRedisError):
+        pass
+
+    # Mock retry and backoff
+    mock_retry = MagicMock()
+    mock_backoff = MagicMock()
+
+    # Patch the imported symbols directly in kv_redis module
+    with patch('nano_graphrag._storage.kv_redis.REDIS_AVAILABLE', True), \
+         patch('nano_graphrag._storage.kv_redis.aioredis', mock_redis_module), \
+         patch('nano_graphrag._storage.kv_redis.ExponentialBackoff', mock_backoff), \
+         patch('nano_graphrag._storage.kv_redis.Retry', mock_retry), \
+         patch('nano_graphrag._storage.kv_redis.RedisError', MockRedisError), \
+         patch('nano_graphrag._storage.kv_redis.RedisConnectionError', MockRedisConnectionError), \
          patch('nano_graphrag.graphrag.get_llm_provider') as mock_get_llm, \
          patch('nano_graphrag.graphrag.get_embedding_provider') as mock_get_embed:
 
