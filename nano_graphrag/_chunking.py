@@ -2,7 +2,7 @@
 
 from typing import Union
 from ._splitter import SeparatorSplitter
-from ._utils import compute_mdhash_id, TokenizerWrapper
+from ._utils import compute_mdhash_id, TokenizerWrapper, logger
 from .base import TextChunkSchema
 from .prompt import PROMPTS
 
@@ -10,17 +10,21 @@ from .prompt import PROMPTS
 def chunking_by_token_size(
     tokens_list: list[list[int]],
     doc_keys,
-    tokenizer_wrapper: TokenizerWrapper, 
+    tokenizer_wrapper: TokenizerWrapper,
     overlap_token_size=128,
     max_token_size=1024,
 ):
+    logger.info(f"[CHUNKING] Token-based chunking: {len(tokens_list)} docs, chunk_size={max_token_size}, overlap={overlap_token_size}")
     results = []
     for index, tokens in enumerate(tokens_list):
         chunk_token = []
         lengths = []
+        num_chunks = 0
         for start in range(0, len(tokens), max_token_size - overlap_token_size):
             chunk_token.append(tokens[start : start + max_token_size])
             lengths.append(min(max_token_size, len(tokens) - start))
+            num_chunks += 1
+        logger.info(f"[CHUNKING] Doc {index}: {len(tokens)} tokens → {num_chunks} chunks")
 
 
         chunk_texts = tokenizer_wrapper.decode_batch(chunk_token)
@@ -44,7 +48,8 @@ def chunking_by_separators(
     overlap_token_size=128,
     max_token_size=1024,
 ):
-    # *** Modified ***: Use wrapper encoding directly instead of getting underlying tokenizer
+    logger.info(f"[CHUNKING] Separator-based chunking: {len(tokens_list)} docs, chunk_size={max_token_size}, overlap={overlap_token_size}")
+    # Use wrapper encoding directly instead of getting underlying tokenizer
     separators = [tokenizer_wrapper.encode(s) for s in PROMPTS["default_text_separator"]]
     splitter = SeparatorSplitter(
         separators=separators,
@@ -55,6 +60,7 @@ def chunking_by_separators(
     for index, tokens in enumerate(tokens_list):
         chunk_tokens = splitter.split_tokens(tokens)
         lengths = [len(c) for c in chunk_tokens]
+        logger.info(f"[CHUNKING] Doc {index}: {len(tokens)} tokens → {len(chunk_tokens)} chunks")
 
         decoded_chunks = tokenizer_wrapper.decode_batch(chunk_tokens)
         for i, chunk in enumerate(decoded_chunks):
@@ -108,9 +114,12 @@ async def get_chunks_v2(
         List of chunk dictionaries with content and metadata
     """
     texts = [text_or_texts] if isinstance(text_or_texts, str) else list(text_or_texts)
+    logger.info(f"[CHUNKING] Processing {len(texts)} text(s) with chunk_size={size}, overlap={overlap}")
     tokens = [tokenizer_wrapper.encode(t) for t in texts]
     doc_keys = [f"doc-{i}" for i in range(len(texts))]
-    
+    total_tokens = sum(len(t) for t in tokens)
+    logger.info(f"[CHUNKING] Total tokens to process: {total_tokens}")
+
     chunks = chunk_func(
         tokens,
         doc_keys=doc_keys,
@@ -118,4 +127,5 @@ async def get_chunks_v2(
         overlap_token_size=overlap,
         max_token_size=size
     )
+    logger.info(f"[CHUNKING] Generated {len(chunks)} total chunks")
     return chunks

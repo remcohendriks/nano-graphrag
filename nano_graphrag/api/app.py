@@ -14,6 +14,15 @@ from .config import settings
 from .routers import documents, query, health, management, jobs
 from .exceptions import StorageUnavailableError
 
+# Configure logging for nano_graphrag modules
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Ensure nano_graphrag loggers are set to INFO
+logging.getLogger('nano_graphrag').setLevel(logging.INFO)
+
 logger = logging.getLogger(__name__)
 
 

@@ -64,6 +64,14 @@ class LLMEntityExtractor(BaseEntityExtractor):
         if isinstance(final_result, list):
             final_result = final_result[0]["text"]
 
+        # Log the raw LLM output for debugging
+        logger.info(f"[EXTRACT] Chunk {chunk_id} - LLM returned {len(final_result) if final_result else 0} chars")
+        if final_result:
+            # Log first 500 chars of the response to see what format we're getting
+            logger.info(f"[EXTRACT] LLM output sample: {final_result}...")
+        else:
+            logger.warning(f"[EXTRACT] LLM returned empty/None result for chunk {chunk_id}")
+
         # Gleaning iterations
         if self.config.max_gleaning > 0:
             continue_prompt = PROMPTS["entity_continue_extraction"]
@@ -91,6 +99,10 @@ class LLMEntityExtractor(BaseEntityExtractor):
             final_result,
             [context_base["record_delimiter"], context_base["completion_delimiter"]],
         )
+
+        logger.info(f"[EXTRACT] Chunk {chunk_id} - Parsed {len(records)} records from LLM output")
+        if records:
+            logger.info(f"[EXTRACT] Sample records (first 3): {records[:3]}")
 
         nodes = {}
         edges = []
@@ -138,6 +150,11 @@ class LLMEntityExtractor(BaseEntityExtractor):
                         "source_id": chunk_id
                     }
                 ))
+
+        # Log extraction results for this chunk
+        logger.info(f"[EXTRACT] Chunk {chunk_id} results: {len(nodes)} entities, {len(edges)} relationships")
+        if not edges and nodes:
+            logger.warning(f"[EXTRACT] Chunk {chunk_id} has entities but NO relationships!")
 
         return ExtractionResult(
             nodes=nodes,

@@ -2,8 +2,10 @@
 
 import os
 import asyncio
+import time
 from typing import AsyncIterator, Dict, List, Optional, Any
 from openai import AsyncOpenAI, APIConnectionError, RateLimitError, AuthenticationError, BadRequestError
+from nano_graphrag._utils import logger
 
 from ..base import (
     BaseLLMProvider,
@@ -152,6 +154,9 @@ class OpenAIResponsesProvider(BaseLLMProvider):
         input_content = self._build_input(prompt, system_prompt, history)
         api_params = self._translate_params(params or {})
 
+        # Estimate input tokens (rough approximation)
+        input_tokens_est = len(input_content) // 4
+
         # Handle max_tokens in kwargs
         if "max_tokens" in kwargs:
             api_params["max_output_tokens"] = kwargs.pop("max_tokens")
@@ -178,6 +183,11 @@ class OpenAIResponsesProvider(BaseLLMProvider):
         if system_prompt:
             final_params["instructions"] = system_prompt
 
+        max_output = api_params.get("max_output_tokens", 2000)
+        logger.info(f"LLM Request: model={self.model}, input_tokens≈{input_tokens_est}, max_output={max_output}, provider=responses_api")
+
+        start_time = time.time()
+
         async def _make_request():
             # No global timeout wrapper - rely on SDK timeout
             return await self.client.responses.create(
@@ -189,17 +199,21 @@ class OpenAIResponsesProvider(BaseLLMProvider):
 
         try:
             response = await self._retry_with_backoff(_make_request)
-        except LLMError:
+            elapsed = time.time() - start_time
+        except LLMError as e:
+            elapsed = time.time() - start_time
+            logger.warning(f"LLM Request failed: model={self.model}, error={str(e)}, time={elapsed:.2f}s")
             raise
         except Exception as e:
+            elapsed = time.time() - start_time
+            logger.warning(f"LLM Request failed: model={self.model}, error={str(e)}, time={elapsed:.2f}s")
             raise self._translate_error(e)
 
         # Extract text from response
         output_text = getattr(response, 'output_text', '')
         if output_text is None:
             output_text = ""
-            import logging
-            logging.warning(f"Got None output from {self.model}")
+            logger.warning(f"Got None output from {self.model}")
 
         # Build usage info if available
         usage = {}
@@ -213,6 +227,16 @@ class OpenAIResponsesProvider(BaseLLMProvider):
                 usage["total_tokens"] = usage_obj.total_tokens
             elif "prompt_tokens" in usage and "completion_tokens" in usage:
                 usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
+
+        # Log response details
+        output_tokens = usage.get("completion_tokens", len(output_text) // 4)
+        total_tokens = usage.get("total_tokens", input_tokens_est + output_tokens)
+
+        # Estimate cost (rough approximation for GPT-5-mini)
+        cost = (usage.get("prompt_tokens", input_tokens_est) * 0.00015 +
+                usage.get("completion_tokens", output_tokens) * 0.00060) / 1000
+
+        logger.info(f"LLM Response: output_tokens={output_tokens}, total_tokens={total_tokens}, time={elapsed:.2f}s, cost≈${cost:.4f}")
 
         return CompletionResponse(
             text=output_text,
@@ -233,6 +257,9 @@ class OpenAIResponsesProvider(BaseLLMProvider):
         """Stream completions using OpenAI Responses API with per-chunk idle timeout."""
         input_content = self._build_input(prompt, system_prompt, history)
         api_params = self._translate_params(params or {})
+
+        # Estimate input tokens for logging
+        input_tokens_est = len(input_content) // 4
 
         # Handle max_tokens in kwargs
         if "max_tokens" in kwargs:
@@ -262,6 +289,13 @@ class OpenAIResponsesProvider(BaseLLMProvider):
 
         # Use idle timeout (per-chunk) instead of global timeout
         idle_timeout = timeout or self.idle_timeout
+
+        max_output = api_params.get("max_output_tokens", 2000)
+        logger.info(f"LLM Stream Request: model={self.model}, input_tokens≈{input_tokens_est}, max_output={max_output}, idle_timeout={idle_timeout}s, provider=responses_api")
+
+        start_time = time.time()
+        chunks_received = 0
+        total_text = ""
 
         async def _make_request():
             # No wait_for wrapper - let the stream run as long as needed
@@ -295,12 +329,20 @@ class OpenAIResponsesProvider(BaseLLMProvider):
                         # Text delta event
                         delta_text = getattr(event, "delta", "")
                         if delta_text:
+                            chunks_received += 1
+                            total_text += delta_text
                             yield StreamChunk(
                                 text=delta_text,
                                 finish_reason=None
                             )
                     elif event_type == "response.completed":
                         # Stream completed successfully
+                        elapsed = time.time() - start_time
+                        output_tokens = len(total_text) // 4
+                        total_tokens = input_tokens_est + output_tokens
+                        # Rough cost estimate for GPT-5-mini
+                        cost = (input_tokens_est * 0.00015 + output_tokens * 0.00060) / 1000
+                        logger.info(f"LLM Stream Response: chunks={chunks_received}, output_tokens≈{output_tokens}, total_tokens≈{total_tokens}, time={elapsed:.2f}s, cost≈${cost:.4f}")
                         yield StreamChunk(
                             text="",
                             finish_reason="stop"
@@ -315,12 +357,18 @@ class OpenAIResponsesProvider(BaseLLMProvider):
                 except StopAsyncIteration:
                     break  # Normal end of stream
                 except asyncio.TimeoutError:
+                    elapsed = time.time() - start_time
+                    logger.warning(f"LLM Stream timeout: model={self.model}, chunks_received={chunks_received}, elapsed={elapsed:.2f}s, idle_timeout={idle_timeout}s")
                     raise LLMTimeoutError(
                         f"No data received for {idle_timeout}s during stream - connection may be stalled"
                     )
-        except LLMError:
+        except LLMError as e:
+            elapsed = time.time() - start_time
+            logger.warning(f"LLM Stream failed: model={self.model}, error={str(e)}, chunks={chunks_received}, time={elapsed:.2f}s")
             raise
         except Exception as e:
+            elapsed = time.time() - start_time
+            logger.warning(f"LLM Stream failed: model={self.model}, error={str(e)}, chunks={chunks_received}, time={elapsed:.2f}s")
             raise self._translate_error(e)
 
 

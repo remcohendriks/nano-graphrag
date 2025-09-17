@@ -1,6 +1,7 @@
 import json
 import asyncio
 import re
+import time
 from collections import defaultdict
 from typing import List, TYPE_CHECKING, Optional, Any, Union
 from dataclasses import dataclass, field
@@ -543,8 +544,10 @@ class Neo4jStorage(BaseGraphStorage):
                 f"Clustering algorithm {algorithm} not supported in Neo4j implementation"
             )
 
+        start_time = time.time()
         random_seed = self.global_config["graph_cluster_seed"]
         max_level = self.global_config["max_graph_cluster_size"]
+        logger.info(f"[GRAPH] Starting {algorithm} clustering with max_level={max_level}, seed={random_seed}")
         graph_created = False
         
         async with self.async_driver.session(database=self.neo4j_database) as session:
@@ -560,6 +563,7 @@ class Neo4jStorage(BaseGraphStorage):
                     logger.info(f"Dropped existing GDS projection '{graph_name}'")
                 
                 # Project the graph with undirected relationships
+                logger.info(f"[GRAPH] Creating GDS projection '{graph_name}'...")
                 await session.run(
                     f"""
                     CALL gds.graph.project(
@@ -575,8 +579,11 @@ class Neo4jStorage(BaseGraphStorage):
                     """
                 )
                 graph_created = True
+                logger.info(f"[GRAPH] GDS projection created")
 
                 # Run Leiden algorithm
+                logger.info(f"[GRAPH] Running Leiden clustering algorithm...")
+                leiden_start = time.time()
                 result = await session.run(
                     f"""
                     CALL gds.leiden.write(
@@ -598,8 +605,9 @@ class Neo4jStorage(BaseGraphStorage):
                 result = await result.single()
                 community_count: int = result["communityCount"] if result else 0
                 modularities = result["modularities"] if result else []
+                leiden_time = time.time() - leiden_start
                 logger.info(
-                    f"Performed graph clustering with {community_count} communities and modularities {modularities}"
+                    f"[GRAPH] Leiden clustering completed in {leiden_time:.2f}s: {community_count} communities, modularities={modularities}"
                 )
 
                 # Retrieve the node->community mapping
@@ -620,6 +628,8 @@ class Neo4jStorage(BaseGraphStorage):
                     communities[node_id] = community_id
 
                 # Return clustering results in expected format
+                total_time = time.time() - start_time
+                logger.info(f"[GRAPH] Total clustering time: {total_time:.2f}s")
                 return {
                     "communities": communities,
                     "community_count": community_count,
@@ -637,6 +647,8 @@ class Neo4jStorage(BaseGraphStorage):
                         logger.warning(f"Failed to drop projected graph: {e}")
 
     async def community_schema(self) -> dict[str, SingleCommunitySchema]:
+        start_time = time.time()
+        logger.info(f"[GRAPH] Building community schema from Neo4j namespace '{self.namespace}'")
         results = defaultdict(
             lambda: dict(
                 level=None,
@@ -716,6 +728,8 @@ class Neo4jStorage(BaseGraphStorage):
                     and set(sub_cluster["nodes"]).issubset(set(cluster["nodes"]))
                 ]
 
+        elapsed = time.time() - start_time
+        logger.info(f"[GRAPH] Community schema built: {len(results)} communities in {elapsed:.2f}s")
         return dict(results)
 
     async def get_pool_stats(self) -> dict:

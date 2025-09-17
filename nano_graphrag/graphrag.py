@@ -1,4 +1,5 @@
 import asyncio
+import time
 from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
@@ -323,6 +324,7 @@ class GraphRAG:
     
     async def ainsert(self, string_or_strings: Union[str, List[str]]):
         """Insert documents asynchronously."""
+        insert_start = time.time()
         logger.info(f"[INSERT] === Starting ainsert ===")
         
         if isinstance(string_or_strings, str):
@@ -366,14 +368,15 @@ class GraphRAG:
                 
             # Extract entities if local query is enabled
             if self.config.query.enable_local:
-                logger.info(f"[INSERT] Starting entity extraction...")
+                logger.info(f"[INSERT] Starting entity extraction for document {doc_id}...")
+                extraction_start = time.time()
                 chunk_map = {}
                 for chunk in chunks:
                     # Include doc_id in hash to prevent cross-document chunk collisions
                     chunk_id_content = f"{doc_id}::{chunk['content']}"
                     chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
                     chunk_map[chunk_id] = chunk
-                
+
                 logger.info(f"[INSERT] Calling entity extraction with {len(chunk_map)} chunks...")
                 await self.entity_extraction_func(
                     chunk_map,
@@ -383,7 +386,8 @@ class GraphRAG:
                     self._global_config(),
                     using_amazon_bedrock=False
                 )
-                logger.info(f"[INSERT] Entity extraction complete")
+                extraction_time = time.time() - extraction_start
+                logger.info(f"[INSERT] Entity extraction complete in {extraction_time:.2f}s")
             
             # Store chunks in vector DB if naive RAG is enabled
             if self.config.query.enable_naive_rag and self.chunks_vdb:
@@ -404,13 +408,16 @@ class GraphRAG:
         # Generate community reports if local query is enabled
         if self.config.query.enable_local:
             logger.info(f"[INSERT] Generating community reports...")
+            report_start = time.time()
             await self._generate_community_reports()
-            logger.info(f"[INSERT] Community reports generated")
+            report_time = time.time() - report_start
+            logger.info(f"[INSERT] Community reports generated in {report_time:.2f}s")
         
         # Flush all storage to ensure persistence
         logger.info(f"[INSERT] Flushing storage...")
         await self._flush_storage()
-        logger.info(f"[INSERT] === Insert complete ===")
+        total_time = time.time() - insert_start
+        logger.info(f"[INSERT] === Insert complete in {total_time:.2f}s ===")
     
     async def _generate_community_reports(self):
         """Generate community reports for graph clusters."""
