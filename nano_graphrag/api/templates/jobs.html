@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nano-graphrag Job Dashboard</title>
+    <link rel="stylesheet" href="/api/v1/static/css/dashboard.css">
+</head>
+<body>
+    <div class="dashboard">
+        <h1>nano-graphrag Job Dashboard</h1>
+
+        <div class="file-upload-container">
+            <h2>Upload Documents</h2>
+            <input type="file" id="fileInput" multiple accept=".txt,.md,.json" />
+            <div id="fileList"></div>
+            <button id="uploadButton" disabled>Upload Files</button>
+            <div id="uploadStatus"></div>
+        </div>
+
+        <div class="controls">
+            <button id="refreshButton">Refresh</button>
+            <label>
+                Auto-refresh:
+                <input type="checkbox" id="autoRefresh" checked>
+            </label>
+        </div>
+
+        <div id="status">Loading...</div>
+
+        <table id="jobsTable">
+            <thead>
+                <tr>
+                    <th>Job ID</th>
+                    <th>Status</th>
+                    <th>Progress</th>
+                    <th>Documents</th>
+                    <th>Created</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody id="jobsBody"></tbody>
+        </table>
+    </div>
+
+    <script src="/api/v1/static/js/dashboard.js"></script>
+</body>
+</html>

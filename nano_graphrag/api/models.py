@@ -51,3 +51,30 @@ class DocumentResponse(BaseModel):
 class ErrorResponse(BaseModel):
     detail: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class JobStatus(str, Enum):
+    """Job status enum."""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class JobProgress(BaseModel):
+    """Job progress tracking."""
+    current: int = 0
+    total: int = 0
+    phase: str = "initializing"
+
+
+class JobResponse(BaseModel):
+    """Job response model."""
+    job_id: str
+    status: JobStatus
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    doc_ids: List[str]
+    progress: JobProgress
+    error: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
