@@ -38,11 +38,12 @@ services:
       EMBEDDING_MODEL: text-embedding-3-small
 
       # Chunking settings optimized for gpt-5-mini (1M input tokens)
-      CHUNKING_SIZE: 10000
+      CHUNKING_SIZE: 20000
       CHUNKING_OVERLAP: 500
 
       # Entity extraction settings
       ENTITY_MAX_GLEANING: 0
+      ENTITY_MAX_CONTINUATIONS: 10  # Max attempts to continue truncated extraction
 
     depends_on:
       - neo4j

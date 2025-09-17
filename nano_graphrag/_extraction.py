@@ -244,11 +244,6 @@ async def extract_entities(
         
         # Log the raw LLM output for debugging
         logger.info(f"[EXTRACT] Chunk {chunk_key} - LLM returned {len(final_result) if final_result else 0} chars")
-        if final_result:
-            # Log first 500 chars of the response to see what format we're getting
-            logger.info(f"[EXTRACT] LLM output sample: {final_result[:500]}...")
-        else:
-            logger.warning(f"[EXTRACT] LLM returned empty/None result for chunk {chunk_key}")
 
         history = pack_user_ass_to_openai_messages(hint_prompt, final_result, using_amazon_bedrock)
         for now_glean_index in range(entity_extract_max_gleaning):

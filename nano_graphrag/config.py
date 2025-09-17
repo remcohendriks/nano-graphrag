@@ -224,22 +224,26 @@ class ChunkingConfig:
 class EntityExtractionConfig:
     """Entity extraction configuration."""
     max_gleaning: int = 1
+    max_continuation_attempts: int = 5  # Max attempts to continue truncated extraction
     summary_max_tokens: int = 500
     strategy: str = "llm"  # llm, dspy
-    
+
     @classmethod
     def from_env(cls) -> 'EntityExtractionConfig':
         """Create config from environment variables."""
         return cls(
             max_gleaning=int(os.getenv("ENTITY_MAX_GLEANING", "1")),
+            max_continuation_attempts=int(os.getenv("ENTITY_MAX_CONTINUATIONS", "5")),
             summary_max_tokens=int(os.getenv("ENTITY_SUMMARY_MAX_TOKENS", "500")),
             strategy=os.getenv("ENTITY_STRATEGY", "llm")
         )
-    
+
     def __post_init__(self):
         """Validate configuration."""
         if self.max_gleaning < 0:
             raise ValueError(f"max_gleaning must be non-negative, got {self.max_gleaning}")
+        if self.max_continuation_attempts < 0:
+            raise ValueError(f"max_continuation_attempts must be non-negative, got {self.max_continuation_attempts}")
         if self.summary_max_tokens <= 0:
             raise ValueError(f"summary_max_tokens must be positive, got {self.summary_max_tokens}")
 

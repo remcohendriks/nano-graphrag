@@ -66,18 +66,58 @@ class LLMEntityExtractor(BaseEntityExtractor):
 
         # Log the raw LLM output for debugging
         logger.info(f"[EXTRACT] Chunk {chunk_id} - LLM returned {len(final_result) if final_result else 0} chars")
-        if final_result:
-            # Log first 500 chars of the response to see what format we're getting
-            logger.info(f"[EXTRACT] LLM output sample: {final_result}...")
-        else:
-            logger.warning(f"[EXTRACT] LLM returned empty/None result for chunk {chunk_id}")
 
-        # Gleaning iterations
+        # Check if extraction is complete or truncated
+        completion_delimiter = context_base["completion_delimiter"]
+        has_completed = completion_delimiter in final_result
+
+        # Check for common truncation indicators
+        is_truncated = (
+            not has_completed and
+            final_result and
+            (final_result.rstrip().endswith(("...", "etc", "etc.")) or len(final_result) > 1500)
+        )
+
+        if is_truncated:
+            logger.info(f"[EXTRACT] Chunk {chunk_id} - Extraction appears truncated, starting continuation...")
+
+        # Continuation loop for truncated extractions
+        history = pack_user_ass_to_openai_messages(hint_prompt, final_result, False)
+        continuation_count = 0
+
+        while not has_completed and is_truncated and continuation_count < self.config.max_continuation_attempts:
+            continuation_prompt = PROMPTS["entity_extraction_continuation"].format(
+                completion_delimiter=completion_delimiter
+            )
+
+            logger.info(f"[EXTRACT] Chunk {chunk_id} - Continuation attempt {continuation_count + 1}/{self.config.max_continuation_attempts}")
+            continuation_result = await self.config.model_func(continuation_prompt, history=history)
+
+            if isinstance(continuation_result, list):
+                continuation_result = continuation_result[0]["text"]
+
+            history += pack_user_ass_to_openai_messages(continuation_prompt, continuation_result, False)
+            final_result += "\n" + continuation_result  # Add newline to separate continuations
+            continuation_count += 1
+
+            logger.info(f"[EXTRACT] Continuation {continuation_count}: Added {len(continuation_result)} chars")
+
+            # Check if we're now complete
+            has_completed = completion_delimiter in continuation_result
+
+            if has_completed:
+                logger.info(f"[EXTRACT] Chunk {chunk_id} - Extraction completed after {continuation_count} continuations")
+                break
+
+        if continuation_count >= self.config.max_continuation_attempts and not has_completed:
+            logger.warning(f"[EXTRACT] Chunk {chunk_id} - Max continuations reached without completion")
+
+        # Gleaning iterations (for finding missed entities, not for continuing truncated output)
         if self.config.max_gleaning > 0:
             continue_prompt = PROMPTS["entity_continue_extraction"]
             if_loop_prompt = PROMPTS["entity_if_loop_extraction"]
 
-            history = pack_user_ass_to_openai_messages(hint_prompt, final_result, False)
+            # Note: history is already set from continuation loop above, which includes all continuations
 
             for glean_index in range(self.config.max_gleaning):
                 glean_result = await self.config.model_func(continue_prompt, history=history)

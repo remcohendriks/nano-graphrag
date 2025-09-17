@@ -13,6 +13,7 @@ def create_extractor(
     model_name: Optional[str] = None,
     entity_types: Optional[list] = None,
     max_gleaning: int = 1,
+    max_continuation_attempts: int = 5,
     summary_max_tokens: int = 500,
     custom_extractor_class: Optional[str] = None,
     **kwargs
@@ -25,6 +26,7 @@ def create_extractor(
         model_name: Model name for DSPy
         entity_types: List of entity types to extract
         max_gleaning: Number of gleaning iterations for LLM
+        max_continuation_attempts: Max attempts to continue truncated extraction
         summary_max_tokens: Max tokens for summaries
         custom_extractor_class: Import path for custom extractor
         **kwargs: Additional strategy-specific parameters
@@ -38,6 +40,7 @@ def create_extractor(
             "PERSON", "ORGANIZATION", "LOCATION", "EVENT", "CONCEPT"
         ],
         max_gleaning=max_gleaning,
+        max_continuation_attempts=max_continuation_attempts,
         summary_max_tokens=summary_max_tokens,
         model_func=model_func,
         model_name=model_name,

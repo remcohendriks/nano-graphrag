@@ -223,6 +223,7 @@ class GraphRAG:
             model_name=self.config.llm.model,
             entity_types=["PERSON", "ORGANIZATION", "LOCATION", "EVENT", "CONCEPT"],
             max_gleaning=self.config.entity_extraction.max_gleaning,
+            max_continuation_attempts=self.config.entity_extraction.max_continuation_attempts,
             summary_max_tokens=self.config.entity_extraction.summary_max_tokens
         )
 
