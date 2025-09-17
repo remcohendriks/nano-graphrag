@@ -16,8 +16,8 @@ templates = Jinja2Templates(directory="nano_graphrag/api/templates")
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def jobs_dashboard(request: Request):
-    """Serve the jobs dashboard HTML page."""
-    return templates.TemplateResponse("jobs.html", {"request": request})
+    """Serve the main dashboard HTML page."""
+    return templates.TemplateResponse("dashboard.html", {"request": request})
 
 
 @router.get("/", response_model=List[JobResponse])
