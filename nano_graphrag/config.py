@@ -12,7 +12,7 @@ class LLMConfig:
     provider: str = "openai"  # openai, azure, bedrock, deepseek
     model: str = "gpt-5-mini"
     max_tokens: int = 32768
-    max_concurrent: int = 16
+    max_concurrent: int = 8
     cache_enabled: bool = True
     temperature: float = 0.0
     request_timeout: float = 30.0
@@ -24,7 +24,7 @@ class LLMConfig:
             provider=os.getenv("LLM_PROVIDER", "openai"),
             model=os.getenv("LLM_MODEL", "gpt-5-mini"),
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "32768")),
-            max_concurrent=int(os.getenv("LLM_MAX_CONCURRENT", "16")),
+            max_concurrent=int(os.getenv("LLM_MAX_CONCURRENT", "8")),
             cache_enabled=os.getenv("LLM_CACHE_ENABLED", "true").lower() == "true",
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.0")),
             request_timeout=float(os.getenv("LLM_REQUEST_TIMEOUT", "30.0"))
@@ -47,7 +47,7 @@ class EmbeddingConfig:
     model: str = "text-embedding-3-small"
     dimension: int = 1536
     batch_size: int = 32
-    max_concurrent: int = 16
+    max_concurrent: int = 8
     
     @classmethod
     def from_env(cls) -> 'EmbeddingConfig':
@@ -57,7 +57,7 @@ class EmbeddingConfig:
             model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
             dimension=int(os.getenv("EMBEDDING_DIMENSION", "1536")),
             batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "32")),
-            max_concurrent=int(os.getenv("EMBEDDING_MAX_CONCURRENT", "16"))
+            max_concurrent=int(os.getenv("EMBEDDING_MAX_CONCURRENT", "8"))
         )
     
     def __post_init__(self):
