@@ -1,6 +1,7 @@
 """Job tracking for async document processing."""
 import asyncio
 import json
+import os
 import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -18,7 +19,8 @@ class JobManager:
 
     def __init__(self, redis_client: Optional[redis.Redis] = None):
         self.redis = redis_client
-        self.job_ttl = 86400  # 24 hours
+        # Configurable TTL via environment variable (default: 7 days)
+        self.job_ttl = int(os.getenv("REDIS_JOB_TTL", "604800"))
 
     async def create_job(
         self,
@@ -48,9 +50,6 @@ class JobManager:
                 self.job_ttl,
                 job_data.model_dump_json()
             )
-
-            # Add to active jobs set
-            await self.redis.sadd("active_jobs", job_id)
 
         logger.info(f"Created job {job_id} for {len(doc_ids)} documents")
         return job_id
@@ -82,11 +81,9 @@ class JobManager:
         job.status = status
         if status == JobStatus.COMPLETED:
             job.completed_at = datetime.now(timezone.utc)
-            await self.redis.srem("active_jobs", job_id)
         elif status == JobStatus.FAILED:
             job.error = error
             job.completed_at = datetime.now(timezone.utc)
-            await self.redis.srem("active_jobs", job_id)
 
         await self.redis.setex(
             f"job:{job_id}",
@@ -131,16 +128,34 @@ class JobManager:
         if not self.redis:
             return []
 
-        # Get all job keys
-        job_keys = await self.redis.keys("job:*")
-        jobs = []
+        # Use SCAN instead of KEYS to avoid blocking Redis
+        cursor = 0
+        job_keys = []
 
-        for key in job_keys[:limit]:
+        while True:
+            cursor, keys = await self.redis.scan(
+                cursor, match="job:*", count=100
+            )
+            job_keys.extend(keys)
+
+            # Stop if we have enough keys or finished scanning
+            if cursor == 0 or len(job_keys) >= limit * 2:  # Get extra to account for filtering
+                break
+
+        jobs = []
+        for key in job_keys:
+            if len(jobs) >= limit:
+                break
+
             job_data = await self.redis.get(key)
             if job_data:
-                job = JobResponse.model_validate_json(job_data)
-                if status is None or job.status == status:
-                    jobs.append(job)
+                try:
+                    job = JobResponse.model_validate_json(job_data)
+                    if status is None or job.status == status:
+                        jobs.append(job)
+                except Exception as e:
+                    logger.warning(f"Failed to parse job data for {key}: {e}")
+                    continue
 
         # Sort by created_at descending
         jobs.sort(key=lambda x: x.created_at, reverse=True)

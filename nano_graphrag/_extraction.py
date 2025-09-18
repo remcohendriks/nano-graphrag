@@ -273,7 +273,7 @@ async def extract_entities(
 
         # Log sample records for debugging
         if records:
-            logger.info(f"[EXTRACT] Sample records (first 3): {records[:3]}")
+            logger.debug(f"[EXTRACT] Sample records (first 3): {records[:3]}")
 
         for record in records:
             record = re.search(r"\((.*)\)", record)

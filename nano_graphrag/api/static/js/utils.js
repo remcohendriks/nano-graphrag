@@ -33,6 +33,22 @@ const Utils = {
         return div.innerHTML;
     },
 
+    // Sanitize URL to prevent XSS attacks
+    sanitizeUrl(url) {
+        // Only allow safe URL schemes
+        const allowedSchemes = ['http://', 'https://', 'mailto:'];
+        const lowerUrl = url.toLowerCase();
+
+        for (const scheme of allowedSchemes) {
+            if (lowerUrl.startsWith(scheme)) {
+                return url;
+            }
+        }
+
+        // Default to safe placeholder for unsafe URLs
+        return '#';
+    },
+
     // Parse markdown to HTML (basic implementation)
     parseMarkdown(text) {
         // This is a very basic markdown parser
@@ -52,8 +68,12 @@ const Utils = {
         html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
         html = html.replace(/_(.+?)_/g, '<em>$1</em>');
 
-        // Links
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+        // Links - with URL sanitization
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+            // Only allow safe URL schemes
+            const safeUrl = this.sanitizeUrl(url);
+            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+        });
 
         // Code blocks
         html = html.replace(/```([^`]+)```/g, '<pre><code>$1</code></pre>');

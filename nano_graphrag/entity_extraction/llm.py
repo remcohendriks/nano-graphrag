@@ -142,7 +142,7 @@ class LLMEntityExtractor(BaseEntityExtractor):
 
         logger.info(f"[EXTRACT] Chunk {chunk_id} - Parsed {len(records)} records from LLM output")
         if records:
-            logger.info(f"[EXTRACT] Sample records (first 3): {records[:3]}")
+            logger.debug(f"[EXTRACT] Sample records (first 3): {records[:3]}")
 
         nodes = {}
         edges = []
