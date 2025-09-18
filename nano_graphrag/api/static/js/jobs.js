@@ -72,20 +72,40 @@ const Jobs = {
 
                     const fill = document.createElement('div');
                     fill.className = 'progress-fill';
-                    const percentage = job.progress.total > 0
-                        ? (job.progress.current / job.progress.total) * 100
-                        : 0;
+
+                    // For phase-based progress, current represents percentage
+                    // For old document-based progress, calculate from current/total
+                    let percentage = 0;
+                    let progressText = '';
+
+                    if (job.progress.phase && !job.progress.phase.includes('document')) {
+                        // New phase-based progress
+                        percentage = job.progress.current;
+                        progressText = job.progress.phase;
+                    } else {
+                        // Legacy document-based progress
+                        percentage = job.progress.total > 0
+                            ? (job.progress.current / job.progress.total) * 100
+                            : 0;
+                        progressText = `${job.progress.current}/${job.progress.total} - ${job.progress.phase}`;
+                    }
+
                     fill.style.width = `${percentage}%`;
 
                     const text = document.createElement('div');
                     text.className = 'progress-text';
-                    text.textContent = `${job.progress.current}/${job.progress.total} - ${job.progress.phase}`;
+                    text.textContent = progressText;
 
                     progressBar.appendChild(fill);
                     progressBar.appendChild(text);
                     progressCell.appendChild(progressBar);
                 } else {
-                    progressCell.textContent = `${job.progress.current}/${job.progress.total}`;
+                    // Show phase for completed jobs or document count for legacy
+                    if (job.progress.phase === 'completed') {
+                        progressCell.textContent = 'Complete';
+                    } else {
+                        progressCell.textContent = `${job.progress.current}/${job.progress.total}`;
+                    }
                 }
 
                 // Documents

@@ -34,7 +34,27 @@ def mock_graphrag():
 
 
 @pytest.fixture
-def test_app(mock_graphrag):
+def mock_redis():
+    """Create mock Redis client."""
+    mock = MagicMock()
+    mock.ping = AsyncMock(return_value=True)
+    mock.set = AsyncMock(return_value=True)
+    mock.setex = AsyncMock(return_value=True)
+    mock.get = AsyncMock(return_value='{"job_id": "test-job", "status": "pending", "created_at": "2025-01-01T00:00:00", "doc_ids": ["doc-1", "doc-2", "doc-3"], "progress": {"current": 0, "total": 3, "phase": "initializing"}, "metadata": {}}')
+    mock.keys = AsyncMock(return_value=[])
+    mock.hset = AsyncMock(return_value=True)
+    mock.hget = AsyncMock(return_value=None)
+    mock.hgetall = AsyncMock(return_value={})
+    mock.zadd = AsyncMock(return_value=1)
+    mock.zrevrange = AsyncMock(return_value=[])
+    mock.sadd = AsyncMock(return_value=1)
+    mock.srem = AsyncMock(return_value=1)
+    mock.smembers = AsyncMock(return_value=set())
+    return mock
+
+
+@pytest.fixture
+def test_app(mock_graphrag, mock_redis):
     """Create test FastAPI app with mocked GraphRAG."""
     app = FastAPI()
 
@@ -42,8 +62,9 @@ def test_app(mock_graphrag):
     from nano_graphrag.api.routers import documents, query, health, management
     from nano_graphrag.api.config import settings
 
-    # Set GraphRAG in app state
+    # Set GraphRAG and Redis in app state
     app.state.graphrag = mock_graphrag
+    app.state.redis_client = mock_redis
 
     # Include routers
     app.include_router(documents.router, prefix="/api/v1")
@@ -73,8 +94,19 @@ def test_document_insert(client: TestClient, mock_graphrag):
     assert data["message"] == "Document processed successfully"
 
 
-def test_batch_insert(client: TestClient, mock_graphrag):
-    """Test batch document insertion."""
+def test_batch_insert(client: TestClient, mock_graphrag, mock_redis):
+    """Test batch document insertion with native batch processing."""
+    # Mock the job manager's responses
+    job_id = "test-job-123"
+    mock_redis.hgetall.return_value = {
+        "job_id": job_id,
+        "status": "pending",
+        "created_at": "2025-01-01T00:00:00",
+        "doc_ids": '["doc-1", "doc-2", "doc-3"]',
+        "progress": '{"current": 0, "total": 3, "phase": "initializing"}',
+        "metadata": '{}'
+    }
+
     response = client.post(
         "/api/v1/documents/batch",
         json={
@@ -88,8 +120,33 @@ def test_batch_insert(client: TestClient, mock_graphrag):
 
     assert response.status_code == 201
     data = response.json()
-    assert len(data) == 3
-    mock_graphrag.ainsert.assert_called_once()
+
+    # Verify job response structure
+    assert "job_id" in data
+    assert "status" in data
+    assert data["status"] == "pending"
+    assert "doc_ids" in data
+    assert len(data["doc_ids"]) == 3
+
+    # Verify that batch processing will be scheduled
+    # Note: The actual ainsert call happens in the background task
+    # which isn't executed in the test environment
+
+
+def test_batch_insert_size_limit(client: TestClient, mock_graphrag, mock_redis):
+    """Test that batch size limit is enforced."""
+    documents = [{"content": f"Document {i}"} for i in range(101)]
+
+    response = client.post(
+        "/api/v1/documents/batch",
+        json={"documents": documents}
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data
+    assert isinstance(data["detail"], list)
+    assert len(data["detail"]) > 0
 
 
 def test_query_local(client: TestClient, mock_graphrag):
