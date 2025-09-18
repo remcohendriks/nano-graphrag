@@ -208,38 +208,66 @@ class OpenAIProvider(BaseLLMProvider):
         timeout: Optional[float] = None,
         **kwargs
     ) -> AsyncIterator[StreamChunk]:
-        """Stream completions from OpenAI API."""
+        """Stream completions from OpenAI API with per-chunk idle timeout."""
         messages = self._build_messages(prompt, system_prompt, history)
         api_params = self._translate_params(params or {})
-        
+
         # Merge kwargs but api_params take precedence
         final_params = {**kwargs, **api_params, "stream": True}
-        
+
+        # Add reasoning_effort for GPT-5 models
+        if "gpt-5" in self.model and "reasoning_effort" not in final_params:
+            final_params["reasoning_effort"] = "minimal"
+
+        # Ensure we have enough tokens for GPT-5 models
+        if "gpt-5" in self.model:
+            if "max_completion_tokens" not in final_params and "max_tokens" not in final_params:
+                final_params["max_completion_tokens"] = 2000
+        else:
+            if "max_tokens" not in final_params:
+                final_params["max_tokens"] = 2000
+
+        # Use idle timeout (per-chunk) instead of global timeout
+        idle_timeout = timeout or self.request_timeout
+
         async def _make_request():
-            return await asyncio.wait_for(
-                self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    **final_params
-                ),
-                timeout=timeout or self.request_timeout
+            # No wait_for wrapper - let the stream run as long as needed
+            return await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                **final_params
             )
-        
+
         try:
             response = await self._retry_with_backoff(_make_request)
         except LLMError:
             raise
         except Exception as e:
             raise self._translate_error(e)
-        
+
+        # Iterate with per-chunk idle timeout
         completion = ChatCompletionStreamState()
-        async for chunk in response:
-            completion.handle_chunk(chunk)
-            if chunk.choices and chunk.choices[0].delta.content is not None:
-                yield StreamChunk(
-                    text=chunk.choices[0].delta.content,
-                    finish_reason=chunk.choices[0].finish_reason
-                )
+        ait = response.__aiter__()
+
+        try:
+            while True:
+                try:
+                    # Only timeout if no chunk arrives within idle_timeout seconds
+                    chunk = await asyncio.wait_for(ait.__anext__(), timeout=idle_timeout)
+                    completion.handle_chunk(chunk)
+                    if chunk.choices and chunk.choices[0].delta.content is not None:
+                        yield StreamChunk(
+                            text=chunk.choices[0].delta.content,
+                            finish_reason=chunk.choices[0].finish_reason
+                        )
+                except StopAsyncIteration:
+                    break  # Normal end of stream
+                except asyncio.TimeoutError:
+                    raise LLMTimeoutError(f"No data received for {idle_timeout}s during stream - connection may be stalled")
+        except LLMError:
+            raise
+        except Exception as e:
+            raise self._translate_error(e)
 
 
 class OpenAIEmbeddingProvider(BaseEmbeddingProvider):

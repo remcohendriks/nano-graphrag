@@ -114,11 +114,11 @@ graph_func = GraphRAG(working_dir="./dickens")
 with open("./book.txt") as f:
     graph_func.insert(f.read())
 
-# Perform global graphrag search
+# Perform global graphrag search (for high-level, thematic questions)
 print(graph_func.query("What are the top themes in this story?"))
 
-# Perform local graphrag search (I think is better and more scalable one)
-print(graph_func.query("What are the top themes in this story?", param=QueryParam(mode="local")))
+# Perform local graphrag search (for specific, detailed questions)
+print(graph_func.query("Who are the main characters and what are their relationships?", param=QueryParam(mode="local")))
 ```
 
 Next time you initialize a `GraphRAG` from the same `working_dir`, it will reload all the contexts automatically.
@@ -183,19 +183,34 @@ Benefits of Redis backend:
 </details>
 
 <details>
-<summary> Naive RAG</summary>
+<summary> Query Modes</summary>
 
-`nano-graphrag` supports naive RAG insert and query as well:
+`nano-graphrag` supports three query modes:
 
 ```python
-graph_func = GraphRAG(working_dir="./dickens", enable_naive_rag=True)
-...
-# Query
-print(rag.query(
-      "What are the top themes in this story?",
-      param=QueryParam(mode="naive")
-)
+from nano_graphrag import GraphRAG, QueryParam
+
+graph_func = GraphRAG(working_dir="./dickens")
+
+# Local mode: entity-based retrieval for specific questions
+print(graph_func.query(
+    "Who is Scrooge?",
+    param=QueryParam(mode="local")
+))
+
+# Global mode: community-based retrieval for thematic questions
+print(graph_func.query(
+    "What are the main themes in this story?",
+    param=QueryParam(mode="global")
+))
+
+# Naive mode (optional): simple vector similarity search
+# Note: Requires enable_naive_rag=True during initialization
+# graph_func = GraphRAG(working_dir="./dickens", enable_naive_rag=True)
+# print(graph_func.query("What is this story about?", param=QueryParam(mode="naive")))
 ```
+
+**Note**: Naive RAG is disabled by default as GraphRAG's local mode provides superior retrieval through entity relationships. Enable naive RAG only if you specifically need vector similarity search.
 </details>
 
 

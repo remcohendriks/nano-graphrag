@@ -1,6 +1,7 @@
 """Community detection and report generation for nano-graphrag."""
 
 import asyncio
+import time
 from typing import Dict, List, Optional, Any, Tuple, Set
 from ._utils import (
     logger,
@@ -315,8 +316,10 @@ async def generate_community_report(
     use_llm_func: callable = global_config["best_model_func"]
     use_string_json_convert_func: callable = global_config["convert_response_to_json_func"]
 
+    start_time = time.time()
     communities_schema = await knowledge_graph_inst.community_schema()
     community_keys, community_values = list(communities_schema.keys()), list(communities_schema.values())
+    logger.info(f"[COMMUNITY] Starting community report generation for {len(community_keys)} communities")
     already_processed = 0
 
     prompt_template = PROMPTS["community_report"]
@@ -343,15 +346,17 @@ async def generate_community_report(
         data = use_string_json_convert_func(response)
         already_processed += 1
         now_ticks = PROMPTS["process_tickers"][already_processed % len(PROMPTS["process_tickers"])]
-        logger.debug(f"{now_ticks} Processed {already_processed} communities")
+        if already_processed % 10 == 0:
+            logger.info(f"[COMMUNITY] {now_ticks} Processed {already_processed}/{len(community_keys)} communities")
         return data
 
     # Process communities level by level, starting from the lowest (most granular)
     # This ensures sub-community reports are available for parent communities
     levels = sorted(set([c["level"] for c in community_values]), reverse=True)
-    logger.info(f"Generating by levels: {levels}")
+    logger.info(f"[COMMUNITY] Processing {len(levels)} hierarchical levels: {levels}")
     community_datas = {}
     for level in levels:
+        level_start = time.time()
         this_level_community_keys, this_level_community_values = zip(
             *[
                 (k, v)
@@ -359,6 +364,7 @@ async def generate_community_report(
                 if v["level"] == level
             ]
         )
+        logger.info(f"[COMMUNITY] Level {level}: Processing {len(this_level_community_keys)} communities")
         this_level_communities_reports = await asyncio.gather(
             *[
                 _form_single_community_report(c, community_datas)
@@ -379,8 +385,14 @@ async def generate_community_report(
                 )
             }
         )
+        level_time = time.time() - level_start
+        logger.info(f"[COMMUNITY] Level {level} completed in {level_time:.2f}s")
+
     # Persist all generated reports
+    logger.info(f"[COMMUNITY] Persisting {len(community_datas)} community reports...")
     await community_report_kv.upsert(community_datas)
+    total_time = time.time() - start_time
+    logger.info(f"[COMMUNITY] Community report generation completed in {total_time:.2f}s")
 
 
 async def summarize_community(

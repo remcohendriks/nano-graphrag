@@ -53,7 +53,11 @@ async def _handle_single_entity_extraction(
     record_attributes: List[str],
     chunk_key: str,
 ) -> Optional[Dict[str, Any]]:
-    if len(record_attributes) < 4 or record_attributes[0] != '"entity"':
+    if len(record_attributes) < 4:
+        logger.debug(f"[EXTRACT] Entity parse failed - not enough attributes: {record_attributes}")
+        return None
+    if record_attributes[0] != '"entity"':
+        logger.debug(f"[EXTRACT] Not an entity record: {record_attributes[0]}")
         return None
     # add this record as a node in the G
     entity_name = clean_str(record_attributes[1].upper())
@@ -74,7 +78,11 @@ async def _handle_single_relationship_extraction(
     record_attributes: List[str],
     chunk_key: str,
 ) -> Optional[Dict[str, Any]]:
-    if len(record_attributes) < 5 or record_attributes[0] != '"relationship"':
+    if len(record_attributes) < 5:
+        logger.debug(f"[EXTRACT] Relationship parse failed - not enough attributes: {record_attributes}")
+        return None
+    if record_attributes[0] != '"relationship"':
+        logger.debug(f"[EXTRACT] Not a relationship record: {record_attributes[0]}")
         return None
     # add this record as edge
     source = clean_str(record_attributes[1].upper())
@@ -201,6 +209,8 @@ async def extract_entities(
     global_config: Dict[str, Any],
     using_amazon_bedrock: bool=False,
 ) -> Optional[BaseGraphStorage]:
+    import time
+    start_time = time.time()
     logger.info(f"[EXTRACT] Starting extract_entities with {len(chunks)} chunks")
     use_llm_func: callable = global_config["best_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
@@ -232,7 +242,8 @@ async def extract_entities(
         if isinstance(final_result, list):
             final_result = final_result[0]["text"]
         
-        logger.debug(f"Chunk {chunk_key} - LLM returned {len(final_result) if final_result else 0} chars")
+        # Log the raw LLM output for debugging
+        logger.info(f"[EXTRACT] Chunk {chunk_key} - LLM returned {len(final_result) if final_result else 0} chars")
 
         history = pack_user_ass_to_openai_messages(hint_prompt, final_result, using_amazon_bedrock)
         for now_glean_index in range(entity_extract_max_gleaning):
@@ -255,8 +266,15 @@ async def extract_entities(
             [context_base["record_delimiter"], context_base["completion_delimiter"]],
         )
 
+        logger.info(f"[EXTRACT] Chunk {chunk_key} - Parsed {len(records)} records from LLM output")
+
         maybe_nodes = defaultdict(list)
         maybe_edges = defaultdict(list)
+
+        # Log sample records for debugging
+        if records:
+            logger.debug(f"[EXTRACT] Sample records (first 3): {records[:3]}")
+
         for record in records:
             record = re.search(r"\((.*)\)", record)
             if record is None:
@@ -279,6 +297,12 @@ async def extract_entities(
                 maybe_edges[(if_relation["src_id"], if_relation["tgt_id"])].append(
                     if_relation
                 )
+
+        # Log extraction results for this chunk
+        logger.info(f"[EXTRACT] Chunk {chunk_key} results: {len(maybe_nodes)} entities, {len(maybe_edges)} relationships")
+        if not maybe_edges and maybe_nodes:
+            logger.warning(f"[EXTRACT] Chunk {chunk_key} has entities but NO relationships!")
+
         already_processed += 1
         already_entities += len(maybe_nodes)
         already_relations += len(maybe_edges)
@@ -291,9 +315,13 @@ async def extract_entities(
         return dict(maybe_nodes), dict(maybe_edges)
 
     # use_llm_func is wrapped in ascynio.Semaphore, limiting max_async callings
+    logger.info(f"[EXTRACT] Processing {len(ordered_chunks)} chunks in parallel...")
+    extract_start = time.time()
     results = await asyncio.gather(
         *[_process_single_content(c) for c in ordered_chunks]
     )
+    extract_time = time.time() - extract_start
+    logger.info(f"[EXTRACT] Parallel extraction completed in {extract_time:.2f}s")
     # Progress complete
     maybe_nodes = defaultdict(list)
     maybe_edges = defaultdict(list)
@@ -304,23 +332,36 @@ async def extract_entities(
             # it's undirected graph
             maybe_edges[tuple(sorted(k))].extend(v)
     
-    logger.debug(f"Extracted {len(maybe_nodes)} unique entities and {len(maybe_edges)} unique relationships")
+    logger.info(f"[EXTRACT] Extracted {len(maybe_nodes)} unique entities and {len(maybe_edges)} unique relationships")
+    logger.info(f"[EXTRACT] Merging and upserting {len(maybe_nodes)} entities...")
+    entity_start = time.time()
     all_entities_data = await asyncio.gather(
         *[
             _merge_nodes_then_upsert(k, v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
             for k, v in maybe_nodes.items()
         ]
     )
+    entity_time = time.time() - entity_start
+    logger.info(f"[EXTRACT] Entity upsert completed in {entity_time:.2f}s")
+
+    logger.info(f"[EXTRACT] Merging and upserting {len(maybe_edges)} relationships...")
+    edge_start = time.time()
     await asyncio.gather(
         *[
             _merge_edges_then_upsert(k[0], k[1], v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
             for k, v in maybe_edges.items()
         ]
     )
+    edge_time = time.time() - edge_start
+    logger.info(f"[EXTRACT] Relationship upsert completed in {edge_time:.2f}s")
     if not len(all_entities_data):
-        logger.warning("Didn't extract any entities, maybe your LLM is not working")
+        logger.warning("[EXTRACT] WARNING: No entities extracted - check LLM configuration")
+        total_time = time.time() - start_time
+        logger.info(f"[EXTRACT] Total extraction time: {total_time:.2f}s (failed - no entities)")
         return None
     if entity_vdb is not None:
+        logger.info(f"[EXTRACT] Updating entity vector DB with {len(all_entities_data)} entities...")
+        vdb_start = time.time()
         data_for_vdb = {
             compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
                 "content": dp["entity_name"] + dp["description"],
@@ -329,6 +370,11 @@ async def extract_entities(
             for dp in all_entities_data
         }
         await entity_vdb.upsert(data_for_vdb)
+        vdb_time = time.time() - vdb_start
+        logger.info(f"[EXTRACT] Vector DB updated in {vdb_time:.2f}s")
+
+    total_time = time.time() - start_time
+    logger.info(f"[EXTRACT] Total extraction time: {total_time:.2f}s (entities: {len(all_entities_data)}, edges: {len(maybe_edges)})")
     return knwoledge_graph_inst
 
 

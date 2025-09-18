@@ -26,7 +26,7 @@ class TestLLMConfig:
         assert config.provider == "openai"
         assert config.model == "gpt-5-mini"
         assert config.max_tokens == 32768
-        assert config.max_concurrent == 16
+        assert config.max_concurrent == 8
         assert config.cache_enabled is True
         assert config.temperature == 0.0
     
@@ -76,7 +76,7 @@ class TestEmbeddingConfig:
         assert config.model == "text-embedding-3-small"
         assert config.dimension == 1536
         assert config.batch_size == 32
-        assert config.max_concurrent == 16
+        assert config.max_concurrent == 8
     
     def test_from_env(self):
         """Test creating from environment variables."""

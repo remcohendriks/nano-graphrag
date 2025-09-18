@@ -1,4 +1,5 @@
 import asyncio
+import time
 from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
@@ -222,6 +223,7 @@ class GraphRAG:
             model_name=self.config.llm.model,
             entity_types=["PERSON", "ORGANIZATION", "LOCATION", "EVENT", "CONCEPT"],
             max_gleaning=self.config.entity_extraction.max_gleaning,
+            max_continuation_attempts=self.config.entity_extraction.max_continuation_attempts,
             summary_max_tokens=self.config.entity_extraction.summary_max_tokens
         )
 
@@ -322,95 +324,105 @@ class GraphRAG:
         return loop.run_until_complete(self.aquery(query, param))
     
     async def ainsert(self, string_or_strings: Union[str, List[str]]):
-        """Insert documents asynchronously."""
+        """Insert documents asynchronously with parallel processing."""
+        insert_start = time.time()
         logger.info(f"[INSERT] === Starting ainsert ===")
-        
+
         if isinstance(string_or_strings, str):
             string_or_strings = [string_or_strings]
             logger.info(f"[INSERT] Processing single document")
         else:
             logger.info(f"[INSERT] Processing {len(string_or_strings)} documents")
-        
-        # Process each document
-        for doc_idx, doc_string in enumerate(string_or_strings):
-            doc_id = compute_mdhash_id(doc_string, prefix="doc-")
-            logger.info(f"[INSERT] Document {doc_idx+1}: {doc_id} ({len(doc_string)} chars)")
-            
-            # Store full document
-            logger.info(f"[INSERT] Storing full document...")
-            await self.full_docs.upsert({doc_id: {"content": doc_string}})
-            logger.info(f"[INSERT] Full document stored")
-            
-            # Chunk the document
-            logger.info(f"[INSERT] Chunking document (size={self.config.chunking.size}, overlap={self.config.chunking.overlap})...")
-            chunks = await get_chunks_v2(
-                doc_string,
-                self.tokenizer_wrapper,
-                self.chunk_func,
-                self.config.chunking.size,
-                self.config.chunking.overlap
-            )
-            logger.info(f"[INSERT] Created {len(chunks)} chunks")
-            
-            # Store chunks
-            logger.info(f"[INSERT] Storing chunks...")
-            for chunk_idx, chunk in enumerate(chunks):
-                # Include doc_id in hash to prevent cross-document chunk collisions
-                chunk_id_content = f"{doc_id}::{chunk['content']}"
-                chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
-                chunk["doc_id"] = doc_id
-                await self.text_chunks.upsert({chunk_id: chunk})
-                if (chunk_idx + 1) % 10 == 0:
-                    logger.info(f"[INSERT] Stored {chunk_idx + 1}/{len(chunks)} chunks")
-            logger.info(f"[INSERT] All chunks stored")
-                
-            # Extract entities if local query is enabled
-            if self.config.query.enable_local:
-                logger.info(f"[INSERT] Starting entity extraction...")
-                chunk_map = {}
-                for chunk in chunks:
-                    # Include doc_id in hash to prevent cross-document chunk collisions
-                    chunk_id_content = f"{doc_id}::{chunk['content']}"
-                    chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
-                    chunk_map[chunk_id] = chunk
-                
-                logger.info(f"[INSERT] Calling entity extraction with {len(chunk_map)} chunks...")
-                await self.entity_extraction_func(
-                    chunk_map,
-                    self.chunk_entity_relation_graph,
-                    self.entities_vdb,
+
+        # Create semaphore to limit parallelism based on LLM max concurrent
+        max_parallel = self.config.llm.max_concurrent
+        logger.info(f"[INSERT] Using parallel processing with max_concurrent={max_parallel}")
+        semaphore = asyncio.Semaphore(max_parallel)
+
+        async def process_single_document(doc_string: str, doc_idx: int):
+            """Process a single document - can run in parallel."""
+            async with semaphore:
+                doc_id = compute_mdhash_id(doc_string, prefix="doc-")
+                logger.info(f"[INSERT] Document {doc_idx+1}: {doc_id} ({len(doc_string)} chars) - started")
+
+                # Store full document
+                await self.full_docs.upsert({doc_id: {"content": doc_string}})
+
+                # Chunk the document
+                chunks = await get_chunks_v2(
+                    doc_string,
                     self.tokenizer_wrapper,
-                    self._global_config(),
-                    using_amazon_bedrock=False
+                    self.chunk_func,
+                    self.config.chunking.size,
+                    self.config.chunking.overlap
                 )
-                logger.info(f"[INSERT] Entity extraction complete")
-            
-            # Store chunks in vector DB if naive RAG is enabled
-            if self.config.query.enable_naive_rag and self.chunks_vdb:
-                logger.info(f"[INSERT] Storing chunks in vector DB...")
-                chunk_dict = {}
-                for chunk in chunks:
+                logger.info(f"[INSERT] Document {doc_idx+1}: Created {len(chunks)} chunks")
+
+                # Store chunks
+                for chunk_idx, chunk in enumerate(chunks):
                     # Include doc_id in hash to prevent cross-document chunk collisions
                     chunk_id_content = f"{doc_id}::{chunk['content']}"
                     chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
-                    chunk_dict[chunk_id] = {
-                        "content": chunk["content"],
-                        "doc_id": doc_id,
-                    }
-                logger.info(f"[INSERT] Calling chunks_vdb.upsert with {len(chunk_dict)} chunks...")
-                await self.chunks_vdb.upsert(chunk_dict)
-                logger.info(f"[INSERT] Chunks stored in vector DB")
-        
-        # Generate community reports if local query is enabled
+                    chunk["doc_id"] = doc_id
+                    await self.text_chunks.upsert({chunk_id: chunk})
+
+                # Extract entities if local query is enabled
+                if self.config.query.enable_local:
+                    extraction_start = time.time()
+                    chunk_map = {}
+                    for chunk in chunks:
+                        # Include doc_id in hash to prevent cross-document chunk collisions
+                        chunk_id_content = f"{doc_id}::{chunk['content']}"
+                        chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
+                        chunk_map[chunk_id] = chunk
+
+                    await self.entity_extraction_func(
+                        chunk_map,
+                        self.chunk_entity_relation_graph,
+                        self.entities_vdb,
+                        self.tokenizer_wrapper,
+                        self._global_config(),
+                        using_amazon_bedrock=False
+                    )
+                    extraction_time = time.time() - extraction_start
+                    logger.info(f"[INSERT] Document {doc_idx+1}: Entity extraction complete in {extraction_time:.2f}s")
+
+                # Store chunks in vector DB if naive RAG is enabled
+                if self.config.query.enable_naive_rag and self.chunks_vdb:
+                    chunk_dict = {}
+                    for chunk in chunks:
+                        # Include doc_id in hash to prevent cross-document chunk collisions
+                        chunk_id_content = f"{doc_id}::{chunk['content']}"
+                        chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
+                        chunk_dict[chunk_id] = {
+                            "content": chunk["content"],
+                            "doc_id": doc_id,
+                        }
+                    await self.chunks_vdb.upsert(chunk_dict)
+
+                logger.info(f"[INSERT] Document {doc_idx+1}: {doc_id} - completed")
+
+        # Process all documents in parallel (limited by semaphore)
+        await asyncio.gather(*[
+            process_single_document(doc_string, doc_idx)
+            for doc_idx, doc_string in enumerate(string_or_strings)
+        ])
+
+        logger.info(f"[INSERT] All documents processed, starting clustering...")
+
+        # Generate community reports if local query is enabled (single clustering operation)
         if self.config.query.enable_local:
             logger.info(f"[INSERT] Generating community reports...")
+            report_start = time.time()
             await self._generate_community_reports()
-            logger.info(f"[INSERT] Community reports generated")
-        
+            report_time = time.time() - report_start
+            logger.info(f"[INSERT] Community reports generated in {report_time:.2f}s")
+
         # Flush all storage to ensure persistence
         logger.info(f"[INSERT] Flushing storage...")
         await self._flush_storage()
-        logger.info(f"[INSERT] === Insert complete ===")
+        total_time = time.time() - insert_start
+        logger.info(f"[INSERT] === Insert complete in {total_time:.2f}s ===")
     
     async def _generate_community_reports(self):
         """Generate community reports for graph clusters."""

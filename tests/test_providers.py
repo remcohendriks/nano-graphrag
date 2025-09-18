@@ -5,21 +5,21 @@ from unittest.mock import patch, AsyncMock, Mock, MagicMock
 from typing import Dict, Any
 
 from nano_graphrag.llm.providers import (
-    OpenAIProvider,
     get_llm_provider,
     get_embedding_provider
 )
+from nano_graphrag.llm.providers.openai_responses import OpenAIResponsesProvider
 from nano_graphrag.llm.base import BaseLLMProvider, BaseEmbeddingProvider
 from nano_graphrag.config import LLMConfig
 
 
 class TestOpenAIProvider:
     """Test OpenAI provider functionality."""
-    
+
     @pytest.mark.asyncio
     async def test_openai_provider_gpt5_params(self):
         """Test GPT-5 specific parameter mapping."""
-        with patch('openai.AsyncOpenAI') as mock_client_class:
+        with patch('nano_graphrag.llm.providers.openai_responses.AsyncOpenAI') as mock_client_class:
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
             
@@ -29,17 +29,20 @@ class TestOpenAIProvider:
             usage.completion_tokens = 90
             usage.total_tokens = 100
             
-            # Mock response with complete structure
+            # Mock response with complete structure for Responses API
             mock_response = Mock()
-            mock_response.choices = [Mock()]
-            mock_response.choices[0].message.content = "test response"
-            mock_response.choices[0].finish_reason = "stop"
-            mock_response.usage = usage
+            mock_response.output_text = "test response"
+            mock_response.usage = Mock()
+            mock_response.usage.input_tokens = 10
+            mock_response.usage.output_tokens = 90
+            mock_response.usage.total_tokens = 100
             
             # Create async mock that returns the response
-            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            # OpenAIResponsesProvider uses responses.create, not chat.completions.create
+            mock_client.responses = MagicMock()
+            mock_client.responses.create = AsyncMock(return_value=mock_response)
             
-            provider = OpenAIProvider(model="gpt-5-mini")
+            provider = OpenAIResponsesProvider(model="gpt-5-mini")
             provider.client = mock_client
             
             # Test max_tokens → max_completion_tokens mapping
@@ -56,13 +59,14 @@ class TestOpenAIProvider:
     @pytest.mark.asyncio
     async def test_provider_none_content_guard(self):
         """Test handling of None content from GPT-5."""
-        with patch('openai.AsyncOpenAI') as mock_client_class:
+        with patch('nano_graphrag.llm.providers.openai_responses.AsyncOpenAI') as mock_client_class:
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
             
-            # Create mock for chat completions
+            # Create mock for responses
             mock_create = AsyncMock()
-            mock_client.chat.completions.create = mock_create
+            mock_client.responses = MagicMock()
+            mock_client.responses.create = mock_create
             
             # Provide full usage object
             usage = Mock()
@@ -70,15 +74,16 @@ class TestOpenAIProvider:
             usage.completion_tokens = 0
             usage.total_tokens = 10
             
-            # Mock response with None content
+            # Mock response with None content for Responses API
             mock_response = Mock()
-            mock_response.choices = [Mock()]
-            mock_response.choices[0].message.content = None
-            mock_response.choices[0].finish_reason = "stop"
-            mock_response.usage = usage
+            mock_response.output_text = None
+            mock_response.usage = Mock()
+            mock_response.usage.input_tokens = 10
+            mock_response.usage.output_tokens = 0
+            mock_response.usage.total_tokens = 10
             mock_create.return_value = mock_response
             
-            provider = OpenAIProvider(model="gpt-5")
+            provider = OpenAIResponsesProvider(model="gpt-5")
             provider.client = mock_client
             
             async def mock_wait_for(coro, timeout):
@@ -97,7 +102,7 @@ class TestOpenAIProvider:
             "LLM_BASE_URL": "http://localhost:1234/v1",
             "OPENAI_API_KEY": "test-key"
         }):
-            with patch('nano_graphrag.llm.providers.openai.AsyncOpenAI') as mock_openai:
+            with patch('nano_graphrag.llm.providers.openai_responses.AsyncOpenAI') as mock_openai:
                 mock_openai.return_value = MagicMock()
                 llm_provider = get_llm_provider('openai', 'test-model')
                 llm_kwargs = mock_openai.call_args.kwargs
@@ -122,10 +127,10 @@ class TestOpenAIProvider:
         mock_kv = AsyncMock(spec=BaseKVStorage)
         mock_kv.get_by_id.return_value = {"return": "cached_result"}
         
-        with patch('openai.AsyncOpenAI') as mock_client_class:
+        with patch('nano_graphrag.llm.providers.openai_responses.AsyncOpenAI') as mock_client_class:
             mock_client_class.return_value = MagicMock()
             
-            provider = OpenAIProvider(model="gpt-5-mini")
+            provider = OpenAIResponsesProvider(model="gpt-5-mini")
             
             # Test cache hit path
             result = await provider.complete_with_cache(
@@ -147,12 +152,12 @@ class TestProviderFactory:
     
     def test_get_llm_provider_openai(self):
         """Test getting OpenAI LLM provider."""
-        with patch('openai.AsyncOpenAI') as mock_client_class:
+        with patch('nano_graphrag.llm.providers.openai_responses.AsyncOpenAI') as mock_client_class:
             mock_client_class.return_value = MagicMock()
 
             provider = get_llm_provider("openai", "gpt-5-mini")
             # Check class name instead of isinstance due to potential import issues
-            assert provider.__class__.__name__ == "OpenAIProvider"
+            assert provider.__class__.__name__ == "OpenAIResponsesProvider"
             assert provider.model == "gpt-5-mini"
     
     def test_get_llm_provider_unknown(self):
@@ -162,7 +167,7 @@ class TestProviderFactory:
     
     def test_get_embedding_provider_openai(self):
         """Test getting OpenAI embedding provider."""
-        with patch('openai.AsyncOpenAI') as mock_client_class:
+        with patch('nano_graphrag.llm.providers.openai_responses.AsyncOpenAI') as mock_client_class:
             mock_client_class.return_value = MagicMock()
             
             provider = get_embedding_provider("openai", "text-embedding-3-small")

@@ -13,6 +13,11 @@ if TYPE_CHECKING:
         gpt_4o_mini_complete,
         openai_embedding,
     )
+    from .openai_responses import (
+        OpenAIResponsesProvider,
+        gpt_4o_complete_responses,
+        gpt_4o_mini_complete_responses,
+    )
     from .deepseek import (
         DeepSeekProvider,
         deepseek_model_if_cache,
@@ -49,13 +54,12 @@ def get_llm_provider(
         LLM provider instance
     """
     if provider_type == "openai":
-        from .openai import OpenAIProvider
-        # Use LLM_BASE_URL if set, otherwise fall back to OPENAI_BASE_URL
+        from .openai_responses import OpenAIResponsesProvider
         base_url = os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL")
-        request_timeout = float(os.getenv("LLM_REQUEST_TIMEOUT", "30.0")) if config else 30.0
+        idle_timeout = float(os.getenv("LLM_REQUEST_TIMEOUT", "30.0")) if config else 30.0
         if config and hasattr(config, 'request_timeout'):
-            request_timeout = config.request_timeout
-        return OpenAIProvider(model=model, base_url=base_url, request_timeout=request_timeout)
+            idle_timeout = config.request_timeout
+        return OpenAIResponsesProvider(model=model, base_url=base_url, idle_timeout=idle_timeout)
     elif provider_type == "azure":
         from .azure import AzureOpenAIProvider
         return AzureOpenAIProvider(model=model)
@@ -121,7 +125,18 @@ def __getattr__(name):
     elif name == "openai_embedding":
         from .openai import openai_embedding
         return openai_embedding
-    
+
+    # OpenAI Responses API exports
+    elif name == "OpenAIResponsesProvider":
+        from .openai_responses import OpenAIResponsesProvider
+        return OpenAIResponsesProvider
+    elif name == "gpt_4o_complete_responses":
+        from .openai_responses import gpt_4o_complete_responses
+        return gpt_4o_complete_responses
+    elif name == "gpt_4o_mini_complete_responses":
+        from .openai_responses import gpt_4o_mini_complete_responses
+        return gpt_4o_mini_complete_responses
+
     # DeepSeek exports
     elif name == "DeepSeekProvider":
         from .deepseek import DeepSeekProvider

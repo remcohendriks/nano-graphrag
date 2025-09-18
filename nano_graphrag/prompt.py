@@ -321,6 +321,14 @@ PROMPTS[
 ] = """It appears some entities may have still been missed.  Answer YES | NO if there are still entities that need to be added.
 """
 
+PROMPTS[
+    "entity_extraction_continuation"
+] = """Continue extracting entities and relationships from where you left off.
+Focus on completing any unfinished entities and especially on extracting relationships between entities.
+Use the same format as before.
+When you have extracted ALL entities and relationships, end with {completion_delimiter}
+"""
+
 PROMPTS["DEFAULT_ENTITY_TYPES"] = ["organization", "person", "geo", "event"]
 PROMPTS["DEFAULT_TUPLE_DELIMITER"] = "<|>"
 PROMPTS["DEFAULT_RECORD_DELIMITER"] = "##"

@@ -109,6 +109,10 @@ class BaseKVStorage(Generic[T], StorageNameSpace):
     async def upsert(self, data: dict[str, T]):
         raise NotImplementedError
 
+    async def delete_by_id(self, id: str) -> bool:
+        """Delete a single item by ID. Returns True if deleted, False if not found."""
+        raise NotImplementedError
+
     async def drop(self):
         raise NotImplementedError
 

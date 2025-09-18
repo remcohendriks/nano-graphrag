@@ -1,5 +1,215 @@
 [
   {
+    "timestamp": "2025-09-18T22:05:56.853132+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "insert": 520.6700649261475,
+      "global_query": 71.06477880477905,
+      "local_query": 12.598696947097778,
+      "reload": 17.483020782470703,
+      "total": 622.522852897644
+    },
+    "counts": {
+      "nodes": 167,
+      "edges": 122,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "naive query failed: Naive RAG mode is disabled in config"
+    ],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "failed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-18T16:41:16.791993+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "global_query": 0.03161120414733887,
+      "local_query": 7.954629182815552,
+      "naive_query": 0.6041762828826904,
+      "reload": 0.03453683853149414,
+      "total": 168.09779286384583
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: Error code: 400 - {'error': {'message': \"This model's maximum context length is 8192 tokens, however you requested 8287 tokens (8287 in your prompt; 0 for the completion). Please reduce your prompt; or completion length.\", 'type': 'invalid_request_error', 'param': None, 'code': None}}"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "failed",
+      "local_query": "passed",
+      "naive_query": "failed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-18T16:35:53.795810+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "global_query": 0.11041092872619629,
+      "local_query": 9.217229127883911,
+      "naive_query": 1.3173737525939941,
+      "reload": 0.03674793243408203,
+      "total": 190.21960306167603
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: Error code: 400 - {'error': {'message': \"This model's maximum context length is 8192 tokens, however you requested 10107 tokens (10107 in your prompt; 0 for the completion). Please reduce your prompt; or completion length.\", 'type': 'invalid_request_error', 'param': None, 'code': None}}"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "failed",
+      "local_query": "passed",
+      "naive_query": "failed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-18T16:28:01.403088+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "local_query": 1.6000430583953857,
+      "naive_query": 0.5976817607879639,
+      "total": 189.11337804794312
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: {code: Neo.ClientError.Security.Unauthorized} {message: The client is unauthorized due to authentication failure.}",
+      "global query failed: {code: Neo.ClientError.Security.AuthenticationRateLimit} {message: The client has provided incorrect authentication details too many times in a row.}",
+      "Reload failed: {code: Neo.ClientError.Security.AuthenticationRateLimit} {message: The client has provided incorrect authentication details too many times in a row.}"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "failed",
+      "local_query": "failed",
+      "naive_query": "failed",
+      "reload": "failed"
+    }
+  },
+  {
+    "timestamp": "2025-09-18T16:18:04.819449+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "local_query": 0.7246530055999756,
+      "naive_query": 0.4940059185028076,
+      "total": 396.922256231308
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: {code: Neo.ClientError.Security.Unauthorized} {message: The client is unauthorized due to authentication failure.}",
+      "global query failed: {code: Neo.ClientError.Security.AuthenticationRateLimit} {message: The client has provided incorrect authentication details too many times in a row.}",
+      "Reload failed: {code: Neo.ClientError.Security.AuthenticationRateLimit} {message: The client has provided incorrect authentication details too many times in a row.}"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "failed",
+      "local_query": "failed",
+      "naive_query": "failed",
+      "reload": "failed"
+    }
+  },
+  {
+    "timestamp": "2025-09-18T16:15:35.471917+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "total": 0.7129490375518799
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: Error Multiple exceptions: [Errno 61] Connect call failed ('::1', 6379, 0, 0), [Errno 61] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.",
+      "global query failed: Unable to retrieve routing information",
+      "local query failed: All connection attempts failed",
+      "naive query failed: All connection attempts failed",
+      "Reload failed: Unable to retrieve routing information"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "failed",
+      "local_query": "failed",
+      "naive_query": "failed",
+      "reload": "failed"
+    }
+  },
+  {
     "timestamp": "2025-09-14T15:26:13.724229+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",

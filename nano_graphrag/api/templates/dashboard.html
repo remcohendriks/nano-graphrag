@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nano-graphrag Dashboard</title>
+    <link rel="stylesheet" href="/api/v1/static/css/dashboard.css">
+</head>
+<body>
+    <div class="dashboard">
+        <h1>nano-graphrag Dashboard</h1>
+
+        <!-- Tab Navigation -->
+        <div class="tab-nav">
+            <button class="tab-button active" data-tab="documents">📄 Documents</button>
+            <button class="tab-button" data-tab="search">🔍 Search</button>
+            <button class="tab-button" data-tab="jobs">📊 Jobs</button>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="tab-content">
+            <!-- Documents Tab -->
+            <div id="documents-tab" class="tab-panel active">
+                <div class="file-upload-container">
+                    <h2>Upload Documents</h2>
+                    <input type="file" id="fileInput" multiple accept=".txt,.md,.json" />
+                    <div id="fileList"></div>
+                    <button id="uploadButton" disabled>Upload Files</button>
+                    <div id="uploadStatus"></div>
+                </div>
+            </div>
+
+            <!-- Search Tab -->
+            <div id="search-tab" class="tab-panel">
+                <div class="search-container">
+                    <h2>Search Your Knowledge Base</h2>
+
+                    <!-- Search Input Group -->
+                    <div class="search-input-group">
+                        <input type="text"
+                               id="searchQuery"
+                               class="search-input"
+                               placeholder="Ask a question about your documents..."
+                               maxlength="1000">
+
+                        <div class="search-controls">
+                            <select id="queryMode" class="query-mode-select">
+                                <option value="local" title="Search within specific graph communities">Local Search</option>
+                                <option value="global" title="Search across all community reports">Global Search</option>
+                                <option value="naive" title="Simple vector similarity search">Simple Search</option>
+                            </select>
+
+                            <button id="searchButton" class="search-button">Search</button>
+                        </div>
+                    </div>
+
+                    <!-- Search History -->
+                    <div id="searchHistory" class="search-history">
+                        <div class="history-header">
+                            <span>Recent Searches</span>
+                            <button id="clearHistory" class="clear-history-btn">Clear</button>
+                        </div>
+                        <div id="historyList" class="history-list"></div>
+                    </div>
+
+                    <!-- Search Results -->
+                    <div id="searchResults" class="search-results">
+                        <!-- Results will be rendered here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Jobs Tab -->
+            <div id="jobs-tab" class="tab-panel">
+                <div class="controls">
+                    <button id="refreshButton">Refresh</button>
+                    <label>
+                        Auto-refresh:
+                        <input type="checkbox" id="autoRefresh" checked>
+                    </label>
+                </div>
+
+                <div id="status">Loading...</div>
+
+                <table id="jobsTable">
+                    <thead>
+                        <tr>
+                            <th>Job ID</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th>Documents</th>
+                            <th>Created</th>
+                            <th>Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody id="jobsBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load JavaScript Modules -->
+    <script src="/api/v1/static/js/utils.js"></script>
+    <script src="/api/v1/static/js/tabs.js"></script>
+    <script src="/api/v1/static/js/documents.js"></script>
+    <script src="/api/v1/static/js/search.js"></script>
+    <script src="/api/v1/static/js/jobs.js"></script>
+    <script src="/api/v1/static/js/dashboard.js"></script>
+</body>
+</html>

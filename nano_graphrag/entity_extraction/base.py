@@ -41,6 +41,7 @@ class ExtractorConfig:
     max_entities_per_chunk: int = 20
     max_relationships_per_chunk: int = 30
     max_gleaning: int = 1
+    max_continuation_attempts: int = 5  # Max attempts to continue truncated extraction
     summary_max_tokens: int = 500
 
     model_func: Optional[Any] = None  # LLM function
