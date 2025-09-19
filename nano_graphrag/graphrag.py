@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from functools import partial
 from pathlib import Path
@@ -313,13 +314,23 @@ class GraphRAG:
 
         # Update entity vector DB
         if entity_vdb is not None:
-            data_for_vdb = {
-                compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
-                    "content": dp["entity_name"] + dp["description"],
+            # Check if type-prefix embeddings are enabled (default: True)
+            enable_type_prefix = os.environ.get("ENABLE_TYPE_PREFIX_EMBEDDINGS", "true").lower() == "true"
+
+            data_for_vdb = {}
+            for dp in all_entities_data:
+                entity_id = compute_mdhash_id(dp["entity_name"], prefix="ent-")
+                # Add type prefix to description if enabled
+                if enable_type_prefix and "entity_type" in dp:
+                    content = dp["entity_name"] + f"[{dp['entity_type']}] " + dp["description"]
+                else:
+                    content = dp["entity_name"] + dp["description"]
+
+                data_for_vdb[entity_id] = {
+                    "content": content,
                     "entity_name": dp["entity_name"],
                 }
-                for dp in all_entities_data
-            }
+
             await entity_vdb.upsert(data_for_vdb)
 
         return knwoledge_graph_inst

@@ -113,14 +113,15 @@ id,entity,type,description
 ```
 Relationships:
 ```csv
-id,source,target,description
-37,VERDANT OASIS PLAZA,UNITY MARCH,Verdant Oasis Plaza is the location of the Unity March
-38,VERDANT OASIS PLAZA,HARMONY ASSEMBLY,Harmony Assembly is holding a march at Verdant Oasis Plaza
-39,VERDANT OASIS PLAZA,UNITY MARCH,The Unity March is taking place at Verdant Oasis Plaza
-40,VERDANT OASIS PLAZA,TRIBUNE SPOTLIGHT,Tribune Spotlight is reporting on the Unity march taking place at Verdant Oasis Plaza
-41,VERDANT OASIS PLAZA,BAILEY ASADI,Bailey Asadi is speaking at Verdant Oasis Plaza about the march
-43,HARMONY ASSEMBLY,UNITY MARCH,Harmony Assembly is organizing the Unity March
+id,source,target,description,relation_type,weight,rank
+37,VERDANT OASIS PLAZA,UNITY MARCH,Verdant Oasis Plaza is the location of the Unity March,HOSTS,1.0,5
+38,VERDANT OASIS PLAZA,HARMONY ASSEMBLY,Harmony Assembly is holding a march at Verdant Oasis Plaza,HOSTS,0.9,4
+39,VERDANT OASIS PLAZA,UNITY MARCH,The Unity March is taking place at Verdant Oasis Plaza,HOSTS,1.0,5
+40,VERDANT OASIS PLAZA,TRIBUNE SPOTLIGHT,Tribune Spotlight is reporting on the Unity march taking place at Verdant Oasis Plaza,RELATED,0.7,3
+41,VERDANT OASIS PLAZA,BAILEY ASADI,Bailey Asadi is speaking at Verdant Oasis Plaza about the march,HOSTS,0.8,3
+43,HARMONY ASSEMBLY,UNITY MARCH,Harmony Assembly is organizing the Unity March,ORGANIZES,1.0,5
 ```
+Note: The relation_type column specifies the semantic type of each relationship. Direction matters: source→target preserves the intended meaning.
 ```
 Output:
 {{
@@ -355,6 +356,9 @@ Do not include information where the supporting evidence for it is not provided.
 ---Data tables---
 
 {context_data}
+
+Note: The Relationships table includes a 'relation_type' column that specifies the semantic type of each relationship (e.g., SUPERSEDES, IMPLEMENTS, DEPENDS_ON).
+The direction matters: source→target preserves the original semantic meaning (e.g., "A SUPERSEDES B" means A replaces B, not the reverse).
 
 
 ---Goal---

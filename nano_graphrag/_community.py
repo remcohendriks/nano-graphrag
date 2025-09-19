@@ -191,7 +191,7 @@ async def _pack_single_community_describe(
         return ','.join('"{}"'.format(str(item).replace('"', '""')) for item in row)
 
     node_fields = ["id", "entity", "type", "description", "degree"]
-    edge_fields = ["id", "source", "target", "description", "rank"]
+    edge_fields = ["id", "source", "target", "description", "relation_type", "weight", "rank"]
 
     # Get degrees and create data structures
     node_degrees = await knowledge_graph_inst.node_degrees_batch(nodes_in_order)
@@ -199,17 +199,30 @@ async def _pack_single_community_describe(
 
     # Filter nodes/edges that already exist in sub-communities
     nodes_list_data = [
-        [i, name, data.get("entity_type", "UNKNOWN"), 
+        [i, name, data.get("entity_type", "UNKNOWN"),
          data.get("description", "UNKNOWN"), node_degrees[i]]
         for i, (name, data) in enumerate(zip(nodes_in_order, nodes_data))
         if name not in contain_nodes
     ]
-    
-    edges_list_data = [
-        [i, edge[0], edge[1], data.get("description", "UNKNOWN") if data else "UNKNOWN", edge_degrees[i]]
-        for i, (edge, data) in enumerate(zip(edges_in_order, edges_data))
-        if (edge[0], edge[1]) not in contain_edges
-    ]
+
+    edges_list_data = []
+    for i, (edge, data) in enumerate(zip(edges_in_order, edges_data)):
+        if (edge[0], edge[1]) not in contain_edges:
+            # Format description with relation type for clarity
+            description = data.get("description", "UNKNOWN") if data else "UNKNOWN"
+            relation_type = data.get("relation_type", "RELATED") if data else "RELATED"
+            weight = data.get("weight", 0.0) if data else 0.0
+
+            # Create edge entry with typed relationship
+            edges_list_data.append([
+                i,
+                edge[0],
+                edge[1],
+                description,
+                relation_type,
+                weight,
+                edge_degrees[i]
+            ])
     
     # Sort by importance (degree)
     nodes_list_data.sort(key=lambda x: x[-1], reverse=True)

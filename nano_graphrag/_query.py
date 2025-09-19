@@ -141,24 +141,39 @@ async def _find_most_related_edges_from_entities(
     tokenizer_wrapper,
 ):
     all_related_edges = await knowledge_graph_inst.get_nodes_edges_batch([dp["entity_name"] for dp in node_datas])
-    
+
     all_edges = []
     seen = set()
-    
+
     for this_edges in all_related_edges:
         for e in this_edges:
+            # CRITICAL: Preserve edge direction for typed relationships
+            # Only sort for deduplication if no relation_type will be present
+            # We'll check for relation_type after fetching edge data
             sorted_edge = tuple(sorted(e))
             if sorted_edge not in seen:
                 seen.add(sorted_edge)
-                all_edges.append(sorted_edge) 
-                
+                all_edges.append(e)  # Keep original edge, not sorted
+
     all_edges_pack = await knowledge_graph_inst.get_edges_batch(all_edges)
     all_edges_degree = await knowledge_graph_inst.edge_degrees_batch(all_edges)
-    all_edges_data = [
-        {"src_tgt": k, "rank": d, **v}
-        for k, v, d in zip(all_edges, all_edges_pack, all_edges_degree)
-        if v is not None
-    ]
+
+    # Now preserve directionality for edges with relation_type
+    all_edges_data = []
+    for edge, edge_data, degree in zip(all_edges, all_edges_pack, all_edges_degree):
+        if edge_data is not None:
+            # If edge has relation_type, preserve original direction
+            # Otherwise use sorted tuple for consistency
+            if "relation_type" in edge_data:
+                src_tgt = edge  # Preserve original direction
+            else:
+                src_tgt = tuple(sorted(edge))  # Sort only if no relation_type
+
+            all_edges_data.append({
+                "src_tgt": src_tgt,
+                "rank": degree,
+                **edge_data
+            })
     all_edges_data = sorted(
         all_edges_data, key=lambda x: (x["rank"], x["weight"]), reverse=True
     )
@@ -218,7 +233,7 @@ async def _build_local_query_context(
     entities_context = list_of_list_to_csv(entities_section_list)
 
     relations_section_list = [
-        ["id", "source", "target", "description", "weight", "rank"]
+        ["id", "source", "target", "description", "relation_type", "weight", "rank"]
     ]
     for i, e in enumerate(use_relations):
         relations_section_list.append(
@@ -227,6 +242,7 @@ async def _build_local_query_context(
                 e["src_tgt"][0],
                 e["src_tgt"][1],
                 e["description"],
+                e.get("relation_type", "RELATED"),  # Default to RELATED if missing
                 e["weight"],
                 e["rank"],
             ]
