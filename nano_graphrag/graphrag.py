@@ -13,6 +13,10 @@ from ._chunking import (
 from ._community import (
     generate_community_report,
 )
+from ._extraction import (
+    get_relation_patterns,
+    map_relation_type,
+)
 from ._query import (
     local_query,
     global_query,
@@ -221,7 +225,7 @@ class GraphRAG:
             strategy=self.config.entity_extraction.strategy,
             model_func=self.best_model_func,
             model_name=self.config.llm.model,
-            entity_types=["PERSON", "ORGANIZATION", "LOCATION", "EVENT", "CONCEPT"],
+            entity_types=self.config.entity_extraction.entity_types,
             max_gleaning=self.config.entity_extraction.max_gleaning,
             max_continuation_attempts=self.config.entity_extraction.max_continuation_attempts,
             summary_max_tokens=self.config.entity_extraction.summary_max_tokens
@@ -276,8 +280,15 @@ class GraphRAG:
         for node_id, node_data in result.nodes.items():
             maybe_nodes[node_id].append(node_data)
 
+        # Apply relation type mapping to edges
+        relation_patterns = get_relation_patterns()
+
         for edge in result.edges:
             src_id, tgt_id, edge_data = edge
+            # Add relation_type if not already present
+            if "relation_type" not in edge_data:
+                description = edge_data.get("description", "")
+                edge_data["relation_type"] = map_relation_type(description, relation_patterns)
             maybe_edges[(src_id, tgt_id)].append(edge_data)
 
         # Merge and upsert nodes

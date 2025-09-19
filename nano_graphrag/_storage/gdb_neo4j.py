@@ -501,10 +501,15 @@ class Neo4jStorage(BaseGraphStorage):
     ):
         if not edges_data:
             return
-        
+
         edges_params = []
         for source_id, target_id, edge_data in edges_data:
             edge_data_copy = edge_data.copy()
+
+            # Extract and sanitize relation type
+            relation_type = edge_data_copy.get("relation_type", "RELATED")
+            relation_type = self._sanitize_label(relation_type)
+
             # Ensure weight is numeric for GDS compatibility
             if "weight" in edge_data_copy:
                 try:
@@ -517,9 +522,10 @@ class Neo4jStorage(BaseGraphStorage):
             edges_params.append({
                 "source_id": source_id,
                 "target_id": target_id,
+                "relation_type": relation_type,
                 "edge_data": edge_data_copy
             })
-        
+
         async with self.async_driver.session(database=self.neo4j_database) as session:
             await session.run(
                 f"""
@@ -531,6 +537,7 @@ class Neo4jStorage(BaseGraphStorage):
                 WHERE t.id = edge.target_id
                 MERGE (s)-[r:RELATED]->(t)
                 SET r += edge.edge_data
+                SET r.relation_type = edge.relation_type
                 """,
                 edges=edges_params
             )

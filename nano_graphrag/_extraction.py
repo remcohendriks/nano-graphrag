@@ -20,6 +20,50 @@ from .base import (
 )
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
 from .schemas import NodeData, EdgeData, ExtractionRecord, RelationshipRecord
+import os
+import json
+import time
+
+
+def get_relation_patterns() -> Dict[str, str]:
+    """Load relation patterns from environment or use defaults."""
+    patterns_json = os.getenv("RELATION_PATTERNS", "")
+    if patterns_json:
+        try:
+            return json.loads(patterns_json)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse RELATION_PATTERNS JSON, using defaults")
+
+    # Domain-agnostic default patterns
+    return {
+        "supersedes": "SUPERSEDES",
+        "superseded by": "SUPERSEDED_BY",
+        "amends": "AMENDS",
+        "implements": "IMPLEMENTS",
+        "revokes": "REVOKES",
+        "depends on": "DEPENDS_ON",
+        "references": "REFERENCES",
+        "derived from": "DERIVED_FROM",
+        "conflicts with": "CONFLICTS_WITH",
+        "replaces": "REPLACES",
+        "extends": "EXTENDS",
+        "inherits from": "INHERITS_FROM",
+        "uses": "USES",
+        "requires": "REQUIRES",
+        "contradicts": "CONTRADICTS"
+    }
+
+
+def map_relation_type(description: str, patterns: Dict[str, str] = None) -> str:
+    """Map relationship description to typed relation."""
+    if patterns is None:
+        patterns = get_relation_patterns()
+
+    desc_lower = description.lower()
+    for pattern, rel_type in patterns.items():
+        if pattern in desc_lower:
+            return rel_type
+    return "RELATED"
 
 
 async def _handle_entity_relation_summary(
@@ -192,12 +236,24 @@ async def _merge_edges_then_upsert(
     description = await _handle_entity_relation_summary(
         (src_id, tgt_id), description, global_config, tokenizer_wrapper
     )
+
+    # Preserve relation_type from any of the input edges if present
+    relation_type = None
+    for dp in edges_data:
+        if "relation_type" in dp:
+            relation_type = dp["relation_type"]
+            break
+
+    edge_data = dict(
+        weight=weight, description=description, source_id=source_id, order=order
+    )
+    if relation_type is not None:
+        edge_data["relation_type"] = relation_type
+
     await knwoledge_graph_inst.upsert_edge(
         src_id,
         tgt_id,
-        edge_data=dict(
-            weight=weight, description=description, source_id=source_id, order=order
-        ),
+        edge_data=edge_data,
     )
 
 
@@ -333,6 +389,14 @@ async def extract_entities(
             maybe_edges[tuple(sorted(k))].extend(v)
     
     logger.info(f"[EXTRACT] Extracted {len(maybe_nodes)} unique entities and {len(maybe_edges)} unique relationships")
+
+    # Map relationship descriptions to typed relations
+    relation_patterns = get_relation_patterns()
+    for edge_key, edge_list in maybe_edges.items():
+        for edge_data in edge_list:
+            description = edge_data.get("description", "")
+            edge_data["relation_type"] = map_relation_type(description, relation_patterns)
+
     logger.info(f"[EXTRACT] Merging and upserting {len(maybe_nodes)} entities...")
     entity_start = time.time()
     all_entities_data = await asyncio.gather(
