@@ -208,12 +208,10 @@ async def _pack_single_community_describe(
     edges_list_data = []
     for i, (edge, data) in enumerate(zip(edges_in_order, edges_data)):
         if (edge[0], edge[1]) not in contain_edges:
-            # Format description with relation type for clarity
             description = data.get("description", "UNKNOWN") if data else "UNKNOWN"
             relation_type = data.get("relation_type", "RELATED") if data else "RELATED"
             weight = data.get("weight", 0.0) if data else 0.0
 
-            # Create edge entry with typed relationship
             edges_list_data.append([
                 i,
                 edge[0],

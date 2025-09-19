@@ -147,27 +147,22 @@ async def _find_most_related_edges_from_entities(
 
     for this_edges in all_related_edges:
         for e in this_edges:
-            # CRITICAL: Preserve edge direction for typed relationships
-            # Only sort for deduplication if no relation_type will be present
-            # We'll check for relation_type after fetching edge data
+            # CRITICAL: Preserve directionality for typed relationships
             sorted_edge = tuple(sorted(e))
             if sorted_edge not in seen:
                 seen.add(sorted_edge)
-                all_edges.append(e)  # Keep original edge, not sorted
+                all_edges.append(e)
 
     all_edges_pack = await knowledge_graph_inst.get_edges_batch(all_edges)
     all_edges_degree = await knowledge_graph_inst.edge_degrees_batch(all_edges)
 
-    # Now preserve directionality for edges with relation_type
     all_edges_data = []
     for edge, edge_data, degree in zip(all_edges, all_edges_pack, all_edges_degree):
         if edge_data is not None:
-            # If edge has relation_type, preserve original direction
-            # Otherwise use sorted tuple for consistency
             if "relation_type" in edge_data:
-                src_tgt = edge  # Preserve original direction
+                src_tgt = edge
             else:
-                src_tgt = tuple(sorted(edge))  # Sort only if no relation_type
+                src_tgt = tuple(sorted(edge))
 
             all_edges_data.append({
                 "src_tgt": src_tgt,
@@ -242,7 +237,7 @@ async def _build_local_query_context(
                 e["src_tgt"][0],
                 e["src_tgt"][1],
                 e["description"],
-                e.get("relation_type", "RELATED"),  # Default to RELATED if missing
+                e.get("relation_type", "RELATED"),
                 e["weight"],
                 e["rank"],
             ]

@@ -281,12 +281,10 @@ class GraphRAG:
         for node_id, node_data in result.nodes.items():
             maybe_nodes[node_id].append(node_data)
 
-        # Apply relation type mapping to edges
         relation_patterns = get_relation_patterns()
 
         for edge in result.edges:
             src_id, tgt_id, edge_data = edge
-            # Add relation_type if not already present
             if "relation_type" not in edge_data:
                 description = edge_data.get("description", "")
                 edge_data["relation_type"] = map_relation_type(description, relation_patterns)
@@ -314,13 +312,11 @@ class GraphRAG:
 
         # Update entity vector DB
         if entity_vdb is not None:
-            # Check if type-prefix embeddings are enabled (default: True)
             enable_type_prefix = os.environ.get("ENABLE_TYPE_PREFIX_EMBEDDINGS", "true").lower() == "true"
 
             data_for_vdb = {}
             for dp in all_entities_data:
                 entity_id = compute_mdhash_id(dp["entity_name"], prefix="ent-")
-                # Add type prefix to description if enabled
                 if enable_type_prefix and "entity_type" in dp:
                     content = dp["entity_name"] + f"[{dp['entity_type']}] " + dp["description"]
                 else:
