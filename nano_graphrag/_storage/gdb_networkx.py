@@ -203,9 +203,8 @@ class NetworkXStorage(BaseGraphStorage):
                 results[cluster_key]["level"] = level
                 results[cluster_key]["title"] = f"Cluster {cluster_key}"
                 results[cluster_key]["nodes"].add(node_id)
-                results[cluster_key]["edges"].update(
-                    [tuple(sorted(e)) for e in this_node_edges]
-                )
+                # Preserve edge direction for typed relationships
+                results[cluster_key]["edges"].update(this_node_edges)
                 # Handle nodes that might not have source_id (e.g., from clustering)
                 if "source_id" in node_data:
                     results[cluster_key]["chunk_ids"].update(

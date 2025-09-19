@@ -18,6 +18,49 @@ class TestDirectionalityPreservation:
     """Test that directional relationships are never inverted."""
 
     @pytest.mark.asyncio
+    async def test_bidirectional_typed_edges_not_lost(self):
+        """Verify bidirectional typed edges are both preserved."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            mock_graph = MagicMock()
+
+            # Bidirectional typed relationships - both should be preserved
+            mock_edges = [
+                ("A", "B"),  # A is parent of B
+                ("B", "A")   # B is child of A
+            ]
+            mock_edge_data = [
+                {"description": "parent of", "relation_type": "PARENT_OF", "weight": 1.0},
+                {"description": "child of", "relation_type": "CHILD_OF", "weight": 1.0}
+            ]
+
+            mock_graph.get_nodes_edges_batch = AsyncMock(return_value=[mock_edges])
+            mock_graph.get_edges_batch = AsyncMock(return_value=mock_edge_data)
+            mock_graph.edge_degrees_batch = AsyncMock(return_value=[5, 5])
+
+            mock_tokenizer = MagicMock()
+            mock_tokenizer.encode = lambda x: [1] * 10
+
+            node_datas = [{"entity_name": "A"}]
+            query_param = QueryParam(local_max_token_for_local_context=1000)
+
+            result = await _find_most_related_edges_from_entities(
+                node_datas, query_param, mock_graph, mock_tokenizer
+            )
+
+            # Both edges should be preserved
+            assert len(result) == 2
+            edge_tuples = [r["src_tgt"] for r in result]
+            assert ("A", "B") in edge_tuples
+            assert ("B", "A") in edge_tuples
+
+            # Check relation types are correct
+            for r in result:
+                if r["src_tgt"] == ("A", "B"):
+                    assert r["relation_type"] == "PARENT_OF"
+                elif r["src_tgt"] == ("B", "A"):
+                    assert r["relation_type"] == "CHILD_OF"
+
+    @pytest.mark.asyncio
     async def test_directional_relations_preserved_in_query(self):
         """Verify A SUPERSEDES B never becomes B SUPERSEDES A in query context."""
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -304,13 +347,15 @@ class TestTypeEnrichedEmbeddings:
                 # The vector DB is called entities_vdb
                 rag.entities_vdb.upsert = mock_upsert
 
-                # Process entities
+                # Process entities (get global_config dict)
+                global_config_dict = rag._global_config()
+
                 await rag._extract_entities_wrapper(
                     chunks={"chunk1": {"content": "test"}},
                     knwoledge_graph_inst=rag.chunk_entity_relation_graph,
                     entity_vdb=rag.entities_vdb,
                     tokenizer_wrapper=rag.tokenizer_wrapper,
-                    global_config=rag._global_config()
+                    global_config=global_config_dict
                 )
 
                 # Verify type prefix was added
@@ -356,13 +401,15 @@ class TestTypeEnrichedEmbeddings:
 
                 rag.entities_vdb.upsert = mock_upsert
 
-                # Process entities
+                # Process entities (get global_config dict)
+                global_config_dict = rag._global_config()
+
                 await rag._extract_entities_wrapper(
                     chunks={"chunk1": {"content": "test"}},
                     knwoledge_graph_inst=rag.chunk_entity_relation_graph,
                     entity_vdb=rag.entities_vdb,
                     tokenizer_wrapper=rag.tokenizer_wrapper,
-                    global_config=rag._global_config()
+                    global_config=global_config_dict
                 )
 
                 # Verify type prefix was NOT added

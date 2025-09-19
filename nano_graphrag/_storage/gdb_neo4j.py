@@ -703,9 +703,10 @@ class Neo4jStorage(BaseGraphStorage):
                     
                     # Add edges if we have connected nodes
                     if connected_nodes:
+                        # Preserve edge direction for typed relationships
                         results[cluster_key]["edges"].update(
                             [
-                                tuple(sorted([node_id, str(connected)]))
+                                (node_id, str(connected))
                                 for connected in connected_nodes
                                 if connected and connected != node_id
                             ]

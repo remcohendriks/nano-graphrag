@@ -148,9 +148,9 @@ async def _find_most_related_edges_from_entities(
     for this_edges in all_related_edges:
         for e in this_edges:
             # CRITICAL: Preserve directionality for typed relationships
-            sorted_edge = tuple(sorted(e))
-            if sorted_edge not in seen:
-                seen.add(sorted_edge)
+            # Use full edge tuple for deduplication to handle bidirectional typed edges
+            if e not in seen:
+                seen.add(e)
                 all_edges.append(e)
 
     all_edges_pack = await knowledge_graph_inst.get_edges_batch(all_edges)
@@ -159,13 +159,10 @@ async def _find_most_related_edges_from_entities(
     all_edges_data = []
     for edge, edge_data, degree in zip(all_edges, all_edges_pack, all_edges_degree):
         if edge_data is not None:
-            if "relation_type" in edge_data:
-                src_tgt = edge
-            else:
-                src_tgt = tuple(sorted(edge))
-
+            # Always preserve original edge direction
+            # The edge tuple represents the actual relationship direction
             all_edges_data.append({
-                "src_tgt": src_tgt,
+                "src_tgt": edge,
                 "rank": degree,
                 **edge_data
             })

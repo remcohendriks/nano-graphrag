@@ -312,7 +312,8 @@ class GraphRAG:
 
         # Update entity vector DB
         if entity_vdb is not None:
-            enable_type_prefix = os.environ.get("ENABLE_TYPE_PREFIX_EMBEDDINGS", "true").lower() == "true"
+            # Use config setting instead of environment variable
+            enable_type_prefix = global_config.get("entity_extraction", {}).get("enable_type_prefix_embeddings", True)
 
             data_for_vdb = {}
             for dp in all_entities_data:
