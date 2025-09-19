@@ -236,12 +236,24 @@ async def _merge_edges_then_upsert(
     description = await _handle_entity_relation_summary(
         (src_id, tgt_id), description, global_config, tokenizer_wrapper
     )
+
+    # Preserve relation_type from any of the input edges if present
+    relation_type = None
+    for dp in edges_data:
+        if "relation_type" in dp:
+            relation_type = dp["relation_type"]
+            break
+
+    edge_data = dict(
+        weight=weight, description=description, source_id=source_id, order=order
+    )
+    if relation_type is not None:
+        edge_data["relation_type"] = relation_type
+
     await knwoledge_graph_inst.upsert_edge(
         src_id,
         tgt_id,
-        edge_data=dict(
-            weight=weight, description=description, source_id=source_id, order=order
-        ),
+        edge_data=edge_data,
     )
 
 

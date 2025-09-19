@@ -12,7 +12,8 @@ class TestCustomEntityTypes:
 
     def test_entity_types_from_env(self):
         """Test entity types can be configured from environment."""
-        with patch.dict(os.environ, {"ENTITY_TYPES": "EXECUTIVE_ORDER,STATUTE,REGULATION"}):
+        # Test with mixed case to verify uppercasing
+        with patch.dict(os.environ, {"ENTITY_TYPES": "executive_order,Statute,REGULATION"}):
             config = EntityExtractionConfig.from_env()
             assert config.entity_types == ["EXECUTIVE_ORDER", "STATUTE", "REGULATION"]
 

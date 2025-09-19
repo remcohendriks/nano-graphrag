@@ -13,6 +13,10 @@ from ._chunking import (
 from ._community import (
     generate_community_report,
 )
+from ._extraction import (
+    get_relation_patterns,
+    map_relation_type,
+)
 from ._query import (
     local_query,
     global_query,
@@ -277,7 +281,6 @@ class GraphRAG:
             maybe_nodes[node_id].append(node_data)
 
         # Apply relation type mapping to edges
-        from nano_graphrag._extraction import get_relation_patterns, map_relation_type
         relation_patterns = get_relation_patterns()
 
         for edge in result.edges:

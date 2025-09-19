@@ -237,8 +237,8 @@ class EntityExtractionConfig:
         """Create config from environment variables."""
         entity_types_str = os.getenv("ENTITY_TYPES", "")
         if entity_types_str and entity_types_str.strip():
-            # Strip whitespace and filter out empty values
-            entity_types = [t.strip() for t in entity_types_str.split(",") if t.strip()]
+            # Strip whitespace, uppercase, and filter out empty values
+            entity_types = [t.strip().upper() for t in entity_types_str.split(",") if t.strip()]
         else:
             entity_types = None
 

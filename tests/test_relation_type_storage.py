@@ -74,8 +74,8 @@ async def test_relation_type_stored_in_graph():
                 chunks={"chunk1": {"content": "test text"}},
                 knwoledge_graph_inst=graph_storage,
                 entity_vdb=None,
-                tokenizer_wrapper=rag.tokenizer,
-                global_config={}
+                tokenizer_wrapper=rag.tokenizer_wrapper,
+                global_config=rag._global_config()
             )
 
             # Verify edges have relation_type
@@ -120,8 +120,8 @@ async def test_relation_type_defaults_to_related():
             chunks={"chunk1": {"content": "test"}},
             knwoledge_graph_inst=graph_storage,
             entity_vdb=None,
-            tokenizer_wrapper=rag.tokenizer,
-            global_config={}
+            tokenizer_wrapper=rag.tokenizer_wrapper,
+            global_config=rag._global_config()
         )
 
         # Verify default relation type
