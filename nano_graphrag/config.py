@@ -2,7 +2,7 @@
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional, Type, Callable, Any
+from typing import Optional, Type, Callable, Any, List
 from pathlib import Path
 
 
@@ -227,15 +227,27 @@ class EntityExtractionConfig:
     max_continuation_attempts: int = 5  # Max attempts to continue truncated extraction
     summary_max_tokens: int = 500
     strategy: str = "llm"  # llm, dspy
+    entity_types: List[str] = field(default_factory=lambda: [
+        "PERSON", "ORGANIZATION", "LOCATION", "EVENT", "DATE",
+        "TIME", "MONEY", "PERCENTAGE", "PRODUCT", "CONCEPT"
+    ])
 
     @classmethod
     def from_env(cls) -> 'EntityExtractionConfig':
         """Create config from environment variables."""
+        entity_types_str = os.getenv("ENTITY_TYPES", "")
+        if entity_types_str and entity_types_str.strip():
+            # Strip whitespace and filter out empty values
+            entity_types = [t.strip() for t in entity_types_str.split(",") if t.strip()]
+        else:
+            entity_types = None
+
         return cls(
             max_gleaning=int(os.getenv("ENTITY_MAX_GLEANING", "1")),
             max_continuation_attempts=int(os.getenv("ENTITY_MAX_CONTINUATIONS", "5")),
             summary_max_tokens=int(os.getenv("ENTITY_SUMMARY_MAX_TOKENS", "500")),
-            strategy=os.getenv("ENTITY_STRATEGY", "llm")
+            strategy=os.getenv("ENTITY_STRATEGY", "llm"),
+            entity_types=entity_types or cls.__dataclass_fields__["entity_types"].default_factory()
         )
 
     def __post_init__(self):
