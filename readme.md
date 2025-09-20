@@ -44,6 +44,8 @@
 
 👌 Small yet [**portable**](#Components)(faiss, neo4j, ollama...), [**asynchronous**](#Async) and fully typed.
 
+✨ **New in v0.2.0+**: Support for custom entity types and typed relationships for domain-specific knowledge graphs!
+
 
 
 > If you're looking for a multi-user RAG solution for long-term user memory, have a look at this project: [memobase](https://github.com/memodb-io/memobase) :)
@@ -269,6 +271,84 @@ Below are the components you can use:
 <summary>Some setup options</summary>
 
 - `GraphRAG(...,always_create_working_dir=False,...)` will skip the dir-creating step. Use it if you switch all your components to non-file storages.
+
+</details>
+
+<details>
+<summary>Custom Entity Types and Typed Relationships</summary>
+
+`nano-graphrag` supports custom entity types and typed relationships for domain-specific knowledge graphs (v0.2.0+):
+
+### Configure Entity Types
+
+```python
+from nano_graphrag import GraphRAG
+from nano_graphrag.config import GraphRAGConfig, EntityExtractionConfig
+
+# Configure custom entity types for your domain
+config = GraphRAGConfig(
+    entity_extraction=EntityExtractionConfig(
+        entity_types=["DRUG", "DISEASE", "PROTEIN", "GENE", "PATHWAY"]  # Medical domain
+    )
+)
+
+graph_func = GraphRAG(config=config)
+```
+
+Or via environment variables:
+```bash
+export ENTITY_TYPES="DRUG,DISEASE,PROTEIN,GENE,PATHWAY"
+```
+
+### Enable Type-Prefix Embeddings
+
+Type-prefix embeddings improve query accuracy by including entity types in the embedding:
+
+```python
+config = GraphRAGConfig(
+    entity_extraction=EntityExtractionConfig(
+        enable_type_prefix_embeddings=True  # Default: True
+    )
+)
+```
+
+This prefixes entity embeddings with their type (e.g., "[DRUG] Aspirin") for better semantic matching.
+
+### Typed Relationships in Queries
+
+The system now preserves typed relationships (e.g., TREATS, CAUSES, INHIBITS) in query contexts, providing more accurate and semantically rich results. This includes:
+- Relationship type preservation in CSV context
+- Bidirectional edge handling (e.g., PARENT_OF/CHILD_OF)
+- Semantic directionality preservation
+
+### Domain Examples
+
+**Legal:**
+```python
+config = GraphRAGConfig(
+    entity_extraction=EntityExtractionConfig(
+        entity_types=["STATUTE", "REGULATION", "CASE", "COURT", "EXECUTIVE_ORDER"]
+    )
+)
+```
+
+**Financial:**
+```python
+config = GraphRAGConfig(
+    entity_extraction=EntityExtractionConfig(
+        entity_types=["COMPANY", "EXECUTIVE", "INVESTOR", "PRODUCT", "MARKET", "CURRENCY"]
+    )
+)
+```
+
+**Software Engineering:**
+```python
+config = GraphRAGConfig(
+    entity_extraction=EntityExtractionConfig(
+        entity_types=["CLASS", "METHOD", "PACKAGE", "MODULE", "LIBRARY", "API", "SERVICE"]
+    )
+)
+```
 
 </details>
 
