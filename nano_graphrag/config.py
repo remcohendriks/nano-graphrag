@@ -231,6 +231,7 @@ class EntityExtractionConfig:
         "PERSON", "ORGANIZATION", "LOCATION", "EVENT", "DATE",
         "TIME", "MONEY", "PERCENTAGE", "PRODUCT", "CONCEPT"
     ])
+    enable_type_prefix_embeddings: bool = True
 
     @classmethod
     def from_env(cls) -> 'EntityExtractionConfig':
@@ -242,12 +243,16 @@ class EntityExtractionConfig:
         else:
             entity_types = None
 
+        # Check for type prefix embeddings config
+        enable_type_prefix = os.getenv("ENABLE_TYPE_PREFIX_EMBEDDINGS", "true").lower() == "true"
+
         return cls(
             max_gleaning=int(os.getenv("ENTITY_MAX_GLEANING", "1")),
             max_continuation_attempts=int(os.getenv("ENTITY_MAX_CONTINUATIONS", "5")),
             summary_max_tokens=int(os.getenv("ENTITY_SUMMARY_MAX_TOKENS", "500")),
             strategy=os.getenv("ENTITY_STRATEGY", "llm"),
-            entity_types=entity_types or cls.__dataclass_fields__["entity_types"].default_factory()
+            entity_types=entity_types or cls.__dataclass_fields__["entity_types"].default_factory(),
+            enable_type_prefix_embeddings=enable_type_prefix
         )
 
     def __post_init__(self):
@@ -346,6 +351,10 @@ class GraphRAGConfig:
             'chunk_overlap_token_size': self.chunking.overlap,
             'entity_extract_max_gleaning': self.entity_extraction.max_gleaning,
             'entity_summary_to_max_tokens': self.entity_extraction.summary_max_tokens,
+            'entity_extraction': {
+                'entity_types': self.entity_extraction.entity_types,
+                'enable_type_prefix_embeddings': self.entity_extraction.enable_type_prefix_embeddings
+            },
             'graph_cluster_algorithm': self.graph_clustering.algorithm,
             'max_graph_cluster_size': self.graph_clustering.max_cluster_size,
             'graph_cluster_seed': self.graph_clustering.seed,
@@ -423,6 +432,10 @@ class GraphRAGConfig:
             'huggingface_model_name': self.chunking.tokenizer_model if self.chunking.tokenizer == "huggingface" else "bert-base-uncased",
             'entity_extract_max_gleaning': self.entity_extraction.max_gleaning,
             'entity_summary_to_max_tokens': self.entity_extraction.summary_max_tokens,
+            'entity_extraction': {
+                'entity_types': self.entity_extraction.entity_types,
+                'enable_type_prefix_embeddings': self.entity_extraction.enable_type_prefix_embeddings
+            },
             'graph_cluster_algorithm': self.graph_clustering.algorithm,
             'max_graph_cluster_size': self.graph_clustering.max_cluster_size,
             'graph_cluster_seed': self.graph_clustering.seed,

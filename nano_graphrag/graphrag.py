@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from functools import partial
 from pathlib import Path
@@ -280,12 +281,10 @@ class GraphRAG:
         for node_id, node_data in result.nodes.items():
             maybe_nodes[node_id].append(node_data)
 
-        # Apply relation type mapping to edges
         relation_patterns = get_relation_patterns()
 
         for edge in result.edges:
             src_id, tgt_id, edge_data = edge
-            # Add relation_type if not already present
             if "relation_type" not in edge_data:
                 description = edge_data.get("description", "")
                 edge_data["relation_type"] = map_relation_type(description, relation_patterns)
@@ -313,13 +312,22 @@ class GraphRAG:
 
         # Update entity vector DB
         if entity_vdb is not None:
-            data_for_vdb = {
-                compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
-                    "content": dp["entity_name"] + dp["description"],
+            # Use config setting instead of environment variable
+            enable_type_prefix = global_config.get("entity_extraction", {}).get("enable_type_prefix_embeddings", True)
+
+            data_for_vdb = {}
+            for dp in all_entities_data:
+                entity_id = compute_mdhash_id(dp["entity_name"], prefix="ent-")
+                if enable_type_prefix and "entity_type" in dp:
+                    content = dp["entity_name"] + f"[{dp['entity_type']}] " + dp["description"]
+                else:
+                    content = dp["entity_name"] + dp["description"]
+
+                data_for_vdb[entity_id] = {
+                    "content": content,
                     "entity_name": dp["entity_name"],
                 }
-                for dp in all_entities_data
-            }
+
             await entity_vdb.upsert(data_for_vdb)
 
         return knwoledge_graph_inst
