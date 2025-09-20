@@ -251,6 +251,40 @@ class TestEnhancedCommunityReports:
     """Test typed relations in community reports."""
 
     @pytest.mark.asyncio
+    async def test_community_report_with_none_global_config(self):
+        """Verify _pack_single_community_describe handles None global_config."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            mock_graph = MagicMock()
+            mock_tokenizer = MagicMock()
+            mock_tokenizer.encode = lambda x: [1] * 10
+
+            community = {
+                "title": "Test Community",
+                "nodes": [],
+                "edges": [],
+                "sub_communities": []
+            }
+
+            mock_graph.get_node = AsyncMock(return_value={})
+            mock_graph.get_edge = AsyncMock(return_value={})
+            mock_graph.node_degrees_batch = AsyncMock(return_value=[])
+            mock_graph.edge_degrees_batch = AsyncMock(return_value=[])
+
+            # This should not raise AttributeError even with None global_config
+            result = await _pack_single_community_describe(
+                mock_graph,
+                community,
+                mock_tokenizer,
+                max_token_size=100,
+                global_config=None  # Explicitly None
+            )
+
+            # Should produce valid output
+            assert "-----Reports-----" in result
+            assert "-----Entities-----" in result
+            assert "-----Relationships-----" in result
+
+    @pytest.mark.asyncio
     async def test_community_report_with_typed_relations(self):
         """Verify community reports include relation types."""
         with tempfile.TemporaryDirectory() as tmp_dir:
