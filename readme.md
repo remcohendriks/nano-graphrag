@@ -279,16 +279,30 @@ Below are the components you can use:
 
 `nano-graphrag` supports custom entity types and typed relationships for domain-specific knowledge graphs (v0.2.0+):
 
+### Core Entity Types (Recommended Baseline)
+
+When customizing entity types, keep a small core so the extractor continues to capture general structure across documents.
+
+- Essential core (minimal): `PERSON`, `ORGANIZATION`, `LOCATION`, `EVENT`, `CONCEPT`
+- Extended defaults (10): `PERSON`, `ORGANIZATION`, `LOCATION`, `EVENT`, `DATE`, `TIME`, `MONEY`, `PERCENTAGE`, `PRODUCT`, `CONCEPT`
+
+Note on replacement semantics: Setting `ENTITY_TYPES` (env) or `entity_extraction.entity_types` (config) fully replaces the default list. For most use cases, include the core types plus your domain-specific types rather than replacing them entirely.
+
 ### Configure Entity Types
 
 ```python
 from nano_graphrag import GraphRAG
 from nano_graphrag.config import GraphRAGConfig, EntityExtractionConfig
 
-# Configure custom entity types for your domain
+# Configure custom entity types for your domain (Medical) and include core types
 config = GraphRAGConfig(
     entity_extraction=EntityExtractionConfig(
-        entity_types=["DRUG", "DISEASE", "PROTEIN", "GENE", "PATHWAY"]  # Medical domain
+        entity_types=[
+            # Core baseline
+            "PERSON", "ORGANIZATION", "LOCATION", "EVENT", "CONCEPT",
+            # Domain-specific
+            "DRUG", "DISEASE", "PROTEIN", "GENE", "PATHWAY"
+        ]
     )
 )
 
@@ -297,7 +311,14 @@ graph_func = GraphRAG(config=config)
 
 Or via environment variables:
 ```bash
-export ENTITY_TYPES="DRUG,DISEASE,PROTEIN,GENE,PATHWAY"
+# Include core + domain types (Medical)
+export ENTITY_TYPES="PERSON,ORGANIZATION,LOCATION,EVENT,CONCEPT,DRUG,DISEASE,PROTEIN,GENE,PATHWAY"
+
+# Legal domain example (include core + legal)
+export ENTITY_TYPES="PERSON,ORGANIZATION,LOCATION,EVENT,CONCEPT,EXECUTIVE_ORDER,STATUTE,REGULATION,CASE,COURT"
+
+# Financial domain example (include core + financial)
+export ENTITY_TYPES="PERSON,ORGANIZATION,LOCATION,EVENT,CONCEPT,COMPANY,EXECUTIVE,INVESTOR,TRANSACTION,PRODUCT"
 ```
 
 ### Enable Type-Prefix Embeddings
@@ -609,4 +630,3 @@ See [testing guide](./docs/testing_guide.md) for detailed testing documentation.
 
 - `nano-graphrag` didn't implement the `covariates` feature of `GraphRAG`
 - `nano-graphrag` implements the global search different from the original. The original use a map-reduce-like style to fill all the communities into context, while `nano-graphrag` only use the top-K important and central communites (use `QueryParam.global_max_consider_community` to control, default to 512 communities).
-

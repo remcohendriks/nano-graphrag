@@ -28,6 +28,7 @@ RUN pip install --no-cache-dir \
 # Copy application code
 COPY nano_graphrag /app/nano_graphrag
 COPY api_server.py /app/
+COPY logging_config.json /app/
 
 # Create working directory for GraphRAG
 RUN mkdir -p /app/api_working_dir
@@ -39,5 +40,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8000/api/v1/health/live')"
 
-# Run the application with INFO level logging
+# Run the application with production logging config
+# For development, the app-managed logging will show INFO logs
+# For production, use --log-config /app/logging_config.json with DISABLE_APP_LOGGING=true
 CMD ["uvicorn", "nano_graphrag.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

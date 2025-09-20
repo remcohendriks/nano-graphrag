@@ -2,6 +2,7 @@
 
 import os
 import asyncio
+import time
 from typing import AsyncIterator, Dict, List, Optional, Any
 import numpy as np
 from openai import AsyncOpenAI, APIConnectionError, RateLimitError, AuthenticationError, BadRequestError
@@ -14,7 +15,7 @@ from tenacity import (
 )
 
 from ..base import (
-    BaseLLMProvider, 
+    BaseLLMProvider,
     BaseEmbeddingProvider,
     CompletionParams,
     CompletionResponse,
@@ -27,7 +28,7 @@ from ..base import (
     LLMServerError,
     LLMBadRequestError
 )
-from ..._utils import deprecated_llm_function
+from ..._utils import deprecated_llm_function, logger
 
 
 class OpenAIProvider(BaseLLMProvider):

@@ -43,7 +43,8 @@ services:
 
       # Entity extraction settings
       ENTITY_MAX_GLEANING: 0
-      ENTITY_MAX_CONTINUATIONS: 10  # Max attempts to continue truncated extraction
+      ENTITY_MAX_CONTINUATIONS: 10
+      ENTITY_TYPES: "PERSON,ORGANIZATION,LOCATION,EVENT,CONCEPT,EXECUTIVE_ORDER,STATUTE,REGULATION,CASE,COURT"
 
     depends_on:
       - neo4j

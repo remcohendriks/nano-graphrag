@@ -14,6 +14,38 @@ from .config import settings
 from .routers import documents, query, health, management, jobs
 from .exceptions import StorageUnavailableError
 
+# Configure nano-graphrag logger with app-managed pattern
+# This ensures INFO logs are visible regardless of uvicorn's logging config
+import sys
+import os
+
+nano_logger = logging.getLogger("nano-graphrag")
+nano_logger.setLevel(logging.INFO)
+
+# App-managed pattern: attach our own handler and don't propagate
+# This makes us independent of uvicorn's root logger configuration
+nano_logger.propagate = False
+
+# Clear any existing handlers to avoid duplicates
+nano_logger.handlers.clear()
+
+# Add a console handler that writes to stdout with explicit flush
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+
+# Use a clear format that shows the logger name
+formatter = logging.Formatter(
+    '%(asctime)s - [%(name)s] - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+console_handler.setFormatter(formatter)
+nano_logger.addHandler(console_handler)
+
+# Optional: Allow disabling app-managed logging via env var for production
+if os.getenv("DISABLE_APP_LOGGING", "false").lower() == "true":
+    nano_logger.handlers.clear()
+    nano_logger.propagate = True  # Fall back to server-managed pattern
+
 # Get logger for this module
 # Note: Logging configuration should be handled by the application server (uvicorn, gunicorn, etc.)
 # or via external configuration (logging.ini, environment variables)
