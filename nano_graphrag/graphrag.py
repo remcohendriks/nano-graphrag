@@ -524,6 +524,9 @@ class GraphRAG:
             raise ValueError("Local query mode is disabled in config")
         if param.mode == "naive" and not self.config.query.enable_naive_rag:
             raise ValueError("Naive RAG mode is disabled in config")
+
+        # Use config value for local_max_token_for_text_unit
+        param.local_max_token_for_text_unit = self.config.query.local_max_token_for_text_unit
         
         # Override response_format for LMStudio (it doesn't support json_object format)
         import os

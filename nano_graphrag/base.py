@@ -16,7 +16,7 @@ class QueryParam:
     # naive search
     naive_max_token_for_text_unit = 12000
     # local search
-    local_max_token_for_text_unit: int = 4000  # 12000 * 0.33
+    local_max_token_for_text_unit: int = 100000
     local_max_token_for_local_context: int = 4800  # 12000 * 0.4
     local_max_token_for_community_report: int = 3200  # 12000 * 0.27
     local_community_single_one: bool = False

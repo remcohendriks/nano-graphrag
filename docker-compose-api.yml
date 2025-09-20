@@ -35,7 +35,8 @@ services:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-5-mini
       EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_MODEL: text-embedding-3-large
+      EMBEDDING_DIMENSION: 3072
 
       # Chunking settings optimized for gpt-5-mini (1M input tokens)
       CHUNKING_SIZE: 20000
@@ -45,6 +46,9 @@ services:
       ENTITY_MAX_GLEANING: 0
       ENTITY_MAX_CONTINUATIONS: 10
       ENTITY_TYPES: "PERSON,ORGANIZATION,LOCATION,EVENT,CONCEPT,EXECUTIVE_ORDER,STATUTE,REGULATION,CASE,COURT"
+
+      # Query settings
+      QUERY_LOCAL_MAX_TOKEN_FOR_TEXT_UNIT: 100000
 
     depends_on:
       - neo4j

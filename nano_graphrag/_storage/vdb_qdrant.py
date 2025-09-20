@@ -53,16 +53,16 @@ class QdrantVectorStorage(BaseVectorStorage):
         """Ensure collection exists with proper configuration."""
         if self._collection_initialized:
             return
-        
+
         logger.debug(f"Checking if Qdrant collection '{self.namespace}' exists...")
-        
+
         # Get client
         client = await self._get_client()
-        
+
         # Check if collection exists
         collections = await client.get_collections()
         exists = any(c.name == self.namespace for c in collections.collections)
-        
+
         if not exists:
             logger.info(f"Creating Qdrant collection: {self.namespace}")
             try:
@@ -84,7 +84,7 @@ class QdrantVectorStorage(BaseVectorStorage):
                     raise
         else:
             logger.debug(f"Qdrant collection '{self.namespace}' already exists")
-        
+
         self._collection_initialized = True
     
     async def upsert(self, data: Dict[str, Dict]):
