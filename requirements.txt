@@ -11,6 +11,8 @@ dspy-ai
 neo4j
 aioboto3
 redis[hiredis]>=5.0.0
+transformers>=4.36.0
+torch>=2.0.0
 
 # Optional: FastAPI dependencies
 # fastapi>=0.115.0

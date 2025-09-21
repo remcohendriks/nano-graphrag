@@ -50,6 +50,10 @@ services:
       # Query settings
       QUERY_LOCAL_MAX_TOKEN_FOR_TEXT_UNIT: 100000
 
+      # Hybrid search settings
+      ENABLE_HYBRID_SEARCH: "true"
+      SPARSE_MODEL_CACHE: "true"
+
     depends_on:
       - neo4j
       - qdrant
