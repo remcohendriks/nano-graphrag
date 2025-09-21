@@ -17,9 +17,23 @@ class QdrantVectorStorage(BaseVectorStorage):
     def __post_init__(self):
         """Initialize Qdrant client and collection."""
         ensure_dependency("qdrant_client", "qdrant-client", "Qdrant vector storage")
-        
+
         from qdrant_client import AsyncQdrantClient, models
-        
+
+        # Check Qdrant client version for hybrid search compatibility
+        try:
+            import qdrant_client
+            client_version = qdrant_client.__version__
+            major, minor = map(int, client_version.split('.')[:2])
+            if major < 1 or (major == 1 and minor < 10):
+                logger.warning(
+                    f"Qdrant client version {client_version} detected. "
+                    f"Hybrid search requires version 1.10.0 or higher. "
+                    f"Some features may not work correctly."
+                )
+        except Exception as e:
+            logger.debug(f"Could not check Qdrant version: {e}")
+
         # Get configuration - check addon_params first, then top-level
         addon_params = self.global_config.get("addon_params", {})
         self._url = addon_params.get("qdrant_url",
@@ -28,19 +42,28 @@ class QdrantVectorStorage(BaseVectorStorage):
                                          self.global_config.get("qdrant_api_key", None))
         self._collection_params = addon_params.get("qdrant_collection_params",
                                                    self.global_config.get("qdrant_collection_params", {}))
-        
+
         # Store models for later use (needed before client creation)
         self._models = models
-        
+
         # Defer client creation to avoid potential sync issues
         self._client = None
         self._AsyncQdrantClient = AsyncQdrantClient
-        
+
         # Collection will be created on first use
         self._collection_initialized = False
 
-        # Hybrid search configuration
-        self._enable_hybrid = os.getenv("ENABLE_HYBRID_SEARCH", "false").lower() == "true"
+        # Get hybrid search config from StorageConfig if available
+        from nano_graphrag.config import HybridSearchConfig
+        if isinstance(self.global_config, dict) and 'hybrid_search' in self.global_config:
+            self._hybrid_config = self.global_config['hybrid_search']
+        elif hasattr(self.global_config, 'hybrid_search'):
+            self._hybrid_config = self.global_config.hybrid_search
+        else:
+            # Fallback to env-based config for backward compatibility
+            self._hybrid_config = HybridSearchConfig.from_env()
+
+        self._enable_hybrid = self._hybrid_config.enabled
 
         logger.info(f"Initialized Qdrant storage for namespace: {self.namespace}")
     
@@ -137,9 +160,10 @@ class QdrantVectorStorage(BaseVectorStorage):
         # Generate sparse embeddings if hybrid enabled
         sparse_embeddings = None
         if self._enable_hybrid:
-            from .sparse_embed import get_sparse_embeddings
+            from ..llm.providers.sparse import SparseEmbeddingProvider
+            provider = SparseEmbeddingProvider(config=self._hybrid_config)
             all_contents = [d.get("content", "") for d in data.values()]
-            sparse_embeddings = await get_sparse_embeddings(all_contents)
+            sparse_embeddings = await provider.embed(all_contents)
             logger.debug(f"Generated sparse embeddings for {len(all_contents)} documents")
 
         # Second pass: create points
@@ -216,8 +240,9 @@ class QdrantVectorStorage(BaseVectorStorage):
     
     async def _query_hybrid(self, client, query: str, query_embedding: list, top_k: int):
         """Execute hybrid search with sparse and dense vectors."""
-        from .sparse_embed import get_sparse_embeddings
-        sparse_result = await get_sparse_embeddings([query])
+        from ..llm.providers.sparse import SparseEmbeddingProvider
+        provider = SparseEmbeddingProvider(config=self._hybrid_config)
+        sparse_result = await provider.embed([query])
         sparse_data = sparse_result[0]
 
         if not sparse_data["indices"]:
@@ -234,12 +259,12 @@ class QdrantVectorStorage(BaseVectorStorage):
                         values=sparse_data["values"]
                     ),
                     using="sparse",
-                    limit=top_k * 2,
+                    limit=min(int(top_k * self._hybrid_config.sparse_top_k_multiplier), 100),
                 ),
                 self._models.Prefetch(
                     query=query_embedding,
                     using="dense",
-                    limit=top_k * 2,
+                    limit=min(int(top_k * self._hybrid_config.dense_top_k_multiplier), 50),
                 ),
             ],
             query=self._models.FusionQuery(fusion=self._models.Fusion.RRF),

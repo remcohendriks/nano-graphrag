@@ -83,6 +83,52 @@ class Node2VecConfig:
 
 
 @dataclass(frozen=True)
+class HybridSearchConfig:
+    """Hybrid search configuration for sparse+dense retrieval."""
+    enabled: bool = False
+    sparse_model: str = "prithvida/Splade_PP_en_v1"
+    device: str = "cpu"  # cpu or cuda
+    rrf_k: int = 60  # RRF fusion parameter
+    sparse_top_k_multiplier: float = 2.0  # Fetch 2x candidates for sparse
+    dense_top_k_multiplier: float = 1.0   # Fetch 1x candidates for dense
+    timeout_ms: int = 5000  # Timeout for sparse encoding
+    batch_size: int = 32  # Batch size for encoding
+    max_length: int = 256  # Max token length for sparse model
+
+    @classmethod
+    def from_env(cls) -> 'HybridSearchConfig':
+        """Create config from environment variables."""
+        return cls(
+            enabled=os.getenv("ENABLE_HYBRID_SEARCH", "false").lower() == "true",
+            sparse_model=os.getenv("SPARSE_MODEL", "prithvida/Splade_PP_en_v1"),
+            device=os.getenv("HYBRID_DEVICE", "cpu"),
+            rrf_k=int(os.getenv("RRF_K", "60")),
+            sparse_top_k_multiplier=float(os.getenv("SPARSE_TOP_K_MULTIPLIER", "2.0")),
+            dense_top_k_multiplier=float(os.getenv("DENSE_TOP_K_MULTIPLIER", "1.0")),
+            timeout_ms=int(os.getenv("SPARSE_TIMEOUT_MS", "5000")),
+            batch_size=int(os.getenv("SPARSE_BATCH_SIZE", "32")),
+            max_length=int(os.getenv("SPARSE_MAX_LENGTH", "256"))
+        )
+
+    def __post_init__(self):
+        """Validate configuration."""
+        if self.rrf_k <= 0:
+            raise ValueError(f"rrf_k must be positive, got {self.rrf_k}")
+        if self.sparse_top_k_multiplier <= 0:
+            raise ValueError(f"sparse_top_k_multiplier must be positive, got {self.sparse_top_k_multiplier}")
+        if self.dense_top_k_multiplier <= 0:
+            raise ValueError(f"dense_top_k_multiplier must be positive, got {self.dense_top_k_multiplier}")
+        if self.timeout_ms <= 0:
+            raise ValueError(f"timeout_ms must be positive, got {self.timeout_ms}")
+        if self.batch_size <= 0:
+            raise ValueError(f"batch_size must be positive, got {self.batch_size}")
+        if self.max_length <= 0:
+            raise ValueError(f"max_length must be positive, got {self.max_length}")
+        if self.device not in {"cpu", "cuda"}:
+            raise ValueError(f"device must be 'cpu' or 'cuda', got {self.device}")
+
+
+@dataclass(frozen=True)
 class StorageConfig:
     """Storage backend configuration."""
     vector_backend: str = "nano"  # nano, hnswlib, milvus, qdrant
@@ -124,7 +170,10 @@ class StorageConfig:
 
     # Node2Vec configuration (for NetworkX backend)
     node2vec: Node2VecConfig = field(default_factory=lambda: Node2VecConfig(enabled=True))
-    
+
+    # Hybrid search configuration
+    hybrid_search: HybridSearchConfig = field(default_factory=lambda: HybridSearchConfig())
+
     @classmethod
     def from_env(cls) -> 'StorageConfig':
         """Create config from environment variables."""
@@ -170,7 +219,8 @@ class StorageConfig:
             redis_max_connections=int(os.getenv("REDIS_MAX_CONNECTIONS", "50")),
             redis_connection_timeout=float(os.getenv("REDIS_CONNECTION_TIMEOUT", "5.0")),
             redis_socket_timeout=float(os.getenv("REDIS_SOCKET_TIMEOUT", "5.0")),
-            redis_health_check_interval=int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30"))
+            redis_health_check_interval=int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30")),
+            hybrid_search=HybridSearchConfig.from_env()
         )
     
     def __post_init__(self):

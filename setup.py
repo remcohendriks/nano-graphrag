@@ -14,12 +14,22 @@ with open("./nano_graphrag/__init__.py") as f:
                 line = line.replace(" ", "").replace('"', "").replace("'", "").strip()
                 vars2readme[v] = line.split("=")[1]
 
-deps = []
-with open("./requirements.txt") as f:
-    for line in f.readlines():
-        if not line.strip():
-            continue
-        deps.append(line.strip())
+# Core dependencies (without transformers/torch)
+core_deps = [
+    "future>=1.0.0",
+    "openai",
+    "tiktoken",
+    "networkx",
+    "graspologic",
+    "nano-vectordb",
+    "hnswlib",
+    "xxhash",
+    "tenacity",
+    "dspy-ai",
+    "neo4j",
+    "aioboto3",
+    "redis[hiredis]>=5.0.0",
+]
 
 setuptools.setup(
     name="nano-graphrag",
@@ -36,8 +46,17 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.9",
-    install_requires=deps,
+    install_requires=core_deps,
     extras_require={
         "qdrant": ["qdrant-client>=1.7.0"],
+        "hybrid": [
+            "transformers>=4.36.0",
+            "torch>=2.0.0",
+        ],
+        "all": [
+            "qdrant-client>=1.7.0",
+            "transformers>=4.36.0",
+            "torch>=2.0.0",
+        ],
     },
 )

@@ -263,6 +263,80 @@ Below are the components you can use:
 - Check [examples/benchmarks](./examples/benchmarks) to see few comparisons between components.
 - **Always welcome to contribute more components.**
 
+## Hybrid Search (Sparse + Dense)
+
+`nano-graphrag` supports hybrid search combining dense embeddings (semantic) with sparse embeddings (lexical) for better retrieval, especially for ID-based queries (v0.3.0+):
+
+### Features
+
+- **Sparse Embeddings**: Uses SPLADE model for lexical matching
+- **Dense Embeddings**: Standard semantic embeddings (OpenAI, etc.)
+- **Fusion**: Reciprocal Rank Fusion (RRF) combines both results
+- **GPU Support**: Optional CUDA acceleration
+- **Memory Bounded**: LRU cache prevents memory bloat
+
+### Installation
+
+```shell
+# Install with hybrid search dependencies
+pip install nano-graphrag[hybrid]
+
+# Or install with all features including Qdrant
+pip install nano-graphrag[all]
+```
+
+### Configuration
+
+```python
+from nano_graphrag import GraphRAG
+from nano_graphrag.config import GraphRAGConfig, HybridSearchConfig
+
+# Enable hybrid search
+config = GraphRAGConfig(
+    hybrid_search=HybridSearchConfig(
+        enabled=True,
+        sparse_model="prithvida/Splade_PP_en_v1",  # SPLADE model
+        device="cuda",  # or "cpu"
+        rrf_k=60,  # RRF fusion parameter
+        sparse_top_k_multiplier=2.0,  # Fetch 2x candidates for sparse
+        dense_top_k_multiplier=1.0,   # Fetch 1x candidates for dense
+        timeout_ms=5000,  # Timeout for sparse encoding
+        batch_size=32,  # Batch size for encoding
+        max_length=256  # Max token length for sparse model
+    )
+)
+
+rag = GraphRAG(config=config)
+```
+
+### Environment Variables
+
+```bash
+# Enable hybrid search
+ENABLE_HYBRID_SEARCH=true
+
+# GPU support (optional)
+HYBRID_DEVICE=cuda  # or cpu
+
+# Model configuration
+SPARSE_MODEL=prithvida/Splade_PP_en_v1
+RRF_K=60
+```
+
+### Requirements
+
+- **Qdrant**: Version 1.10.0+ for hybrid search support
+- **PyTorch**: Required for sparse embeddings (`pip install torch`)
+- **Transformers**: For SPLADE model (`pip install transformers`)
+
+### Use Cases
+
+Hybrid search excels at:
+- **ID-based queries**: "What does EO 14282 say about..."
+- **Acronym matching**: "NASA", "FBI", "CEO"
+- **Code/Technical terms**: Function names, error codes
+- **Mixed queries**: Combining semantic understanding with exact matches
+
 ## Advances
 
 
