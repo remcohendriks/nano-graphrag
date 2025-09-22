@@ -506,6 +506,9 @@ class GraphRAG:
                     continue
             
             if entity_dict:
+                # Generate embeddings for the updated entity descriptions
+                # This ensures both dense and sparse embeddings are created
+                logger.info(f"[COMMUNITY] Updating {len(entity_dict)} entities with new embeddings")
                 await self.entities_vdb.upsert(entity_dict)
     
     def _global_config(self) -> dict:

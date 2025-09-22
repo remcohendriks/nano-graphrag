@@ -14,8 +14,8 @@ from typing import Any, Union, Literal, Callable, Optional, Dict
 import numpy as np
 import tiktoken
 
-
-from transformers import AutoTokenizer
+# Lazy import to avoid loading transformers at module level
+AutoTokenizer = None
 
 logger = logging.getLogger("nano-graphrag")
 logging.getLogger("neo4j").setLevel(logging.ERROR)
@@ -179,8 +179,12 @@ class TokenizerWrapper:
         if self.tokenizer_type == "tiktoken":
             self._tokenizer = tiktoken.encoding_for_model(self.model_name)
         elif self.tokenizer_type == "huggingface":
+            global AutoTokenizer
             if AutoTokenizer is None:
-                raise ImportError("`transformers` is not installed. Please install it via `pip install transformers` to use HuggingFace tokenizers.")
+                try:
+                    from transformers import AutoTokenizer
+                except ImportError:
+                    raise ImportError("`transformers` is not installed. Please install it via `pip install transformers` to use HuggingFace tokenizers.")
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=True)
         else:
             raise ValueError(f"Unknown tokenizer_type: {self.tokenizer_type}")

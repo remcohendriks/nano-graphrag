@@ -1,6 +1,22 @@
 version: '3.8'
 
 services:
+  # SPLADE Sparse Embedding Service
+  splade:
+    build:
+      context: ./splade-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    networks:
+      - graphrag-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   # FastAPI application
   api:
     build:
@@ -51,13 +67,17 @@ services:
       QUERY_LOCAL_MAX_TOKEN_FOR_TEXT_UNIT: 100000
 
       # Hybrid search settings
-      ENABLE_HYBRID_SEARCH: "true"
-      SPARSE_MODEL_CACHE: "true"
+      ENABLE_HYBRID_SEARCH: ${ENABLE_HYBRID_SEARCH:-true}
+      SPARSE_SERVICE_URL: http://splade:8001
+      RRF_K: ${RRF_K:-60}
+      SPARSE_TOP_K_MULTIPLIER: ${SPARSE_TOP_K_MULTIPLIER:-2.0}
+      DENSE_TOP_K_MULTIPLIER: ${DENSE_TOP_K_MULTIPLIER:-1.0}
 
     depends_on:
       - neo4j
       - qdrant
       - redis
+      - splade
     networks:
       - graphrag-network
     volumes:

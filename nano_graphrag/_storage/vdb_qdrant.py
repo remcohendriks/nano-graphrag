@@ -93,27 +93,30 @@ class QdrantVectorStorage(BaseVectorStorage):
         if not exists:
             logger.info(f"Creating Qdrant collection: {self.namespace}")
             try:
-                # Configure vectors for dense or hybrid
                 if self._enable_hybrid:
-                    vectors_config = {
-                        "dense": self._models.VectorParams(
+                    logger.info(f"Creating hybrid collection with dense and sparse vectors")
+                    await client.create_collection(
+                        collection_name=self.namespace,
+                        vectors_config={
+                            "dense": self._models.VectorParams(
+                                size=self.embedding_func.embedding_dim,
+                                distance=self._models.Distance.COSINE
+                            )
+                        },
+                        sparse_vectors_config={
+                            "sparse": self._models.SparseVectorParams()
+                        },
+                        **self._collection_params
+                    )
+                else:
+                    await client.create_collection(
+                        collection_name=self.namespace,
+                        vectors_config=self._models.VectorParams(
                             size=self.embedding_func.embedding_dim,
                             distance=self._models.Distance.COSINE
                         ),
-                        "sparse": self._models.SparseVectorParams()
-                    }
-                    logger.info(f"Creating hybrid collection with dense and sparse vectors")
-                else:
-                    vectors_config = self._models.VectorParams(
-                        size=self.embedding_func.embedding_dim,
-                        distance=self._models.Distance.COSINE
+                        **self._collection_params
                     )
-
-                await client.create_collection(
-                    collection_name=self.namespace,
-                    vectors_config=vectors_config,
-                    **self._collection_params
-                )
                 logger.info(f"Created Qdrant collection: {self.namespace}")
             except Exception as e:
                 # Handle race condition where another process created it
@@ -267,6 +270,9 @@ class QdrantVectorStorage(BaseVectorStorage):
                     limit=min(int(top_k * self._hybrid_config.dense_top_k_multiplier), 50),
                 ),
             ],
+            # NOTE: Qdrant currently uses a fixed RRF k=60 parameter internally.
+            # The rrf_k config parameter is ready for when Qdrant supports custom k values.
+            # See: https://qdrant.tech/documentation/concepts/hybrid-queries/
             query=self._models.FusionQuery(fusion=self._models.Fusion.RRF),
             limit=top_k,
             with_payload=True
@@ -307,21 +313,28 @@ class QdrantVectorStorage(BaseVectorStorage):
         client = await self._get_client()
 
         # Execute search
+        search_type = "hybrid" if self._enable_hybrid else "dense"
         try:
             if self._enable_hybrid:
+                logger.debug(f"Executing hybrid search for query: '{query[:50]}...'")
                 response = await self._query_hybrid(client, query, query_embedding, top_k)
             else:
+                logger.debug(f"Executing dense-only search for query: '{query[:50]}...'")
                 response = await self._query_dense(client, query_embedding, top_k)
         except Exception as e:
             if self._enable_hybrid:
                 logger.warning(f"Hybrid search failed, falling back to dense: {e}")
+                search_type = "dense-fallback"
                 response = await self._query_dense(client, query_embedding, top_k, use_named=True)
             else:
                 raise
 
         # Format and return results
         formatted_results = self._format_results(response)
-        logger.debug(f"Query returned {len(formatted_results)} results")
+        logger.debug(
+            f"Query completed via {search_type} path: "
+            f"returned {len(formatted_results)} results"
+        )
         return formatted_results
     
     async def index_done_callback(self):

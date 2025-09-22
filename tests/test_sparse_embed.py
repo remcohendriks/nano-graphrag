@@ -1,168 +1,123 @@
-"""Tests for sparse embedding provider."""
+"""Tests for sparse embedding provider with external service."""
 
-import asyncio
-import os
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, patch, MagicMock
+from nano_graphrag.config import HybridSearchConfig
+from nano_graphrag.llm.providers.sparse import SparseEmbeddingProvider
 
 
 @pytest.mark.asyncio
-async def test_sparse_embedding_disabled():
-    """Test that sparse embeddings return empty when disabled."""
-    from nano_graphrag.config import HybridSearchConfig
-    from nano_graphrag.llm.providers.sparse import SparseEmbeddingProvider
+async def test_sparse_provider_no_service():
+    """Test sparse provider returns empty when no service configured."""
+    config = HybridSearchConfig(enabled=True)
 
-    config = HybridSearchConfig(enabled=False)
-    provider = SparseEmbeddingProvider(config=config)
-
-    result = await provider.embed(["test text"])
-    assert result == [{"indices": [], "values": []}]
-
-
-@pytest.mark.asyncio
-async def test_sparse_embedding_lru_cache():
-    """Test that model is cached with LRU."""
-    from nano_graphrag.config import HybridSearchConfig
-    from nano_graphrag.llm.providers.sparse import SparseEmbeddingProvider, get_cached_model
-
-    mock_tokenizer = MagicMock()
-    mock_model = MagicMock()
-
-    with patch("transformers.AutoTokenizer") as mock_auto_tok:
-        with patch("transformers.AutoModelForMaskedLM") as mock_auto_model:
-            mock_auto_tok.from_pretrained.return_value = mock_tokenizer
-            mock_auto_model.from_pretrained.return_value = mock_model
-            mock_model.eval = MagicMock()
-
-            # Clear LRU cache
-            get_cached_model.cache_clear()
-
-            config = HybridSearchConfig(enabled=True, sparse_model="test-model")
-            provider = SparseEmbeddingProvider(config=config)
-
-            # Mock torch module
-            import sys
-            mock_torch = MagicMock()
-            mock_torch.cuda.is_available.return_value = False
-            sys.modules['torch'] = mock_torch
-
-            # First call should load model
-            get_cached_model("test-model", "cpu")
-            assert mock_auto_tok.from_pretrained.call_count == 1
-
-            # Second call should use cache
-            get_cached_model("test-model", "cpu")
-            assert mock_auto_tok.from_pretrained.call_count == 1  # Still 1
-
-
-@pytest.mark.asyncio
-async def test_sparse_embedding_timeout():
-    """Test timeout handling."""
-    from nano_graphrag.config import HybridSearchConfig
-    from nano_graphrag.llm.providers.sparse import SparseEmbeddingProvider
-
-    config = HybridSearchConfig(enabled=True, timeout_ms=1)  # Very short timeout
-    provider = SparseEmbeddingProvider(config=config)
-
-    # Mock slow encoding
-    async def slow_embed_batch(*args, **kwargs):
-        await asyncio.sleep(1)  # Longer than timeout
-        return []
-
-    with patch.object(provider, '_embed_batch', slow_embed_batch):
-        result = await provider.embed(["test"])
-        assert result == [{"indices": [], "values": []}]
-
-
-@pytest.mark.asyncio
-async def test_sparse_embedding_batch_processing():
-    """Test batch processing logic."""
-    from nano_graphrag.config import HybridSearchConfig
-    from nano_graphrag.llm.providers.sparse import SparseEmbeddingProvider, get_cached_model
-
-    # Clear LRU cache
-    get_cached_model.cache_clear()
-
-    # Mock torch to avoid actual model loading
-    import sys
-    mock_torch = MagicMock()
-    mock_torch.cuda.is_available.return_value = False
-    mock_torch.no_grad = MagicMock()
-    mock_torch.no_grad.return_value.__enter__ = MagicMock()
-    mock_torch.no_grad.return_value.__exit__ = MagicMock()
-
-    # Create mock tensors
-    mock_logits = MagicMock()
-    mock_logits.__getitem__ = lambda self, idx: MagicMock()
-    mock_torch.max.return_value.values = MagicMock()
-    mock_torch.log1p.return_value = MagicMock()
-    mock_torch.relu.return_value = MagicMock()
-    mock_torch.nonzero.return_value.squeeze.return_value.numel.return_value = 0
-
-    sys.modules['torch'] = mock_torch
-
-    mock_tokenizer = MagicMock()
-    mock_model = MagicMock()
-
-    # Setup tokenizer mock
-    mock_tokenizer.return_value = {
-        "input_ids": MagicMock(),
-        "attention_mask": MagicMock()
-    }
-
-    # Setup model mock
-    mock_output = MagicMock()
-    mock_output.logits = mock_logits
-    mock_model.return_value = mock_output
-    mock_model.eval = MagicMock()
-
-    with patch("transformers.AutoTokenizer") as mock_auto_tok:
-        with patch("transformers.AutoModelForMaskedLM") as mock_auto_model:
-            mock_auto_tok.from_pretrained.return_value = mock_tokenizer
-            mock_auto_model.from_pretrained.return_value = mock_model
-
-            config = HybridSearchConfig(enabled=True, batch_size=2)
-            provider = SparseEmbeddingProvider(config=config)
-
-            # Test with 3 texts (batch size 2)
-            texts = ["text1", "text2", "text3"]
-            result = await provider.embed(texts)
-
-            assert len(result) == 3
-            for item in result:
-                assert "indices" in item
-                assert "values" in item
-                assert isinstance(item["indices"], list)
-                assert isinstance(item["values"], list)
-
-
-@pytest.mark.asyncio
-async def test_sparse_embedding_error_handling():
-    """Test graceful error handling."""
-    from nano_graphrag.config import HybridSearchConfig
-    from nano_graphrag.llm.providers.sparse import SparseEmbeddingProvider, get_cached_model
-
-    # Clear LRU cache
-    get_cached_model.cache_clear()
-
-    with patch("transformers.AutoTokenizer") as mock_auto:
-        mock_auto.from_pretrained.side_effect = Exception("Model load failed")
-
-        config = HybridSearchConfig(enabled=True)
+    with patch.dict("os.environ", {}, clear=True):
         provider = SparseEmbeddingProvider(config=config)
+        result = await provider.embed(["test text"])
 
-        result = await provider.embed(["test"])
-        assert result == [{"indices": [], "values": []}]
+        assert len(result) == 1
+        assert result[0]["indices"] == []
+        assert result[0]["values"] == []
 
 
 @pytest.mark.asyncio
-async def test_sparse_embedding_empty_input():
-    """Test handling empty input."""
-    from nano_graphrag.config import HybridSearchConfig
-    from nano_graphrag.llm.providers.sparse import SparseEmbeddingProvider
+async def test_sparse_provider_disabled():
+    """Test sparse provider returns empty when disabled."""
+    config = HybridSearchConfig(enabled=False)
+
+    with patch.dict("os.environ", {"SPARSE_SERVICE_URL": "http://test:8001"}):
+        provider = SparseEmbeddingProvider(config=config)
+        result = await provider.embed(["test text"])
+
+        assert len(result) == 1
+        assert result[0]["indices"] == []
+        assert result[0]["values"] == []
+
+
+@pytest.mark.asyncio
+async def test_sparse_provider_with_service():
+    """Test sparse provider calls external service correctly."""
+    config = HybridSearchConfig(
+        enabled=True
+    )
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        "embeddings": [
+            {"indices": [1, 10, 100], "values": [0.5, 0.3, 0.2]},
+            {"indices": [2, 20, 200], "values": [0.6, 0.4, 0.1]}
+        ]
+    }
+    mock_response.raise_for_status = MagicMock()
+
+    with patch.dict("os.environ", {"SPARSE_SERVICE_URL": "http://test:8001"}):
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            provider = SparseEmbeddingProvider(config=config)
+            result = await provider.embed(["text1", "text2"])
+
+            # Check service was called
+            mock_client.post.assert_called_once_with(
+                "http://test:8001/embed",
+                json={"texts": ["text1", "text2"]}
+            )
+
+            # Check results
+            assert len(result) == 2
+            assert result[0]["indices"] == [1, 10, 100]
+            assert result[0]["values"] == [0.5, 0.3, 0.2]
+            assert result[1]["indices"] == [2, 20, 200]
+            assert result[1]["values"] == [0.6, 0.4, 0.1]
+
+
+@pytest.mark.asyncio
+async def test_sparse_provider_service_timeout():
+    """Test sparse provider handles service timeout gracefully."""
+    import httpx
 
     config = HybridSearchConfig(enabled=True)
-    provider = SparseEmbeddingProvider(config=config)
 
-    result = await provider.embed([])
-    assert result == []
+    with patch.dict("os.environ", {"SPARSE_SERVICE_URL": "http://test:8001"}):
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post.side_effect = httpx.TimeoutException("timeout")
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            provider = SparseEmbeddingProvider(config=config)
+            result = await provider.embed(["test"])
+
+            # Should return empty on timeout
+            assert len(result) == 1
+            assert result[0]["indices"] == []
+            assert result[0]["values"] == []
+
+
+@pytest.mark.asyncio
+async def test_sparse_provider_service_error():
+    """Test sparse provider handles service errors gracefully."""
+    import httpx
+
+    config = HybridSearchConfig(enabled=True)
+
+    with patch.dict("os.environ", {"SPARSE_SERVICE_URL": "http://test:8001"}):
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 500
+            mock_response.text = "Internal Server Error"
+            mock_client.post.return_value = mock_response
+            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "500", request=None, response=mock_response
+            )
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            provider = SparseEmbeddingProvider(config=config)
+            result = await provider.embed(["test"])
+
+            # Should return empty on error
+            assert len(result) == 1
+            assert result[0]["indices"] == []
+            assert result[0]["values"] == []
