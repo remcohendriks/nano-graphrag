@@ -475,41 +475,76 @@ class GraphRAG:
             # Get all unique node IDs from community schema
             schema = await self.chunk_entity_relation_graph.community_schema()
             all_node_ids = sorted({node_id for comm in schema.values() for node_id in comm.get("nodes", [])})
-            
-            # Batch fetch node data
-            entity_dict = {}
-            for node_id in all_node_ids:
-                # Get individual node data (batch method may not exist)
-                try:
-                    node_data = await self.chunk_entity_relation_graph.get_node(node_id)
-                    if node_data:
-                        # Get description and ensure it's not empty for embedding
-                        description = node_data.get("description", "").strip()
+
+            # Check if we should use payload-only updates (for hybrid search)
+            use_payload_update = (
+                hasattr(self.entities_vdb, 'update_payload') and
+                self.global_config.get("enable_hybrid_search", False)
+            )
+
+            if use_payload_update:
+                # Payload-only update to preserve embeddings
+                from nano_graphrag._utils import compute_mdhash_id
+                updates = {}
+                for node_id in all_node_ids:
+                    try:
+                        node_data = await self.chunk_entity_relation_graph.get_node(node_id)
+                        if not node_data:
+                            continue
+                        description = (node_data.get("description", "") or "").strip()
                         if not description:
-                            # Use entity name and type as fallback content
-                            entity_name = node_data.get("name", node_id).strip() if node_data.get("name") else node_id
+                            entity_name = (node_data.get("name") or node_id).strip()
                             entity_type = node_data.get("entity_type", "UNKNOWN")
                             description = f"{entity_name} ({entity_type})"
-                        
-                        # Final check to ensure description is not empty
-                        if description and description != " (UNKNOWN)":
-                            entity_dict[node_id] = {
-                                "content": description,
-                                "entity_name": node_data.get("name", node_id),
-                                "entity_type": node_data.get("entity_type", "UNKNOWN"),
-                            }
-                        else:
-                            logger.debug(f"Skipping entity {node_id} with empty description")
-                except Exception as e:
-                    # Node might not exist, skip it
-                    logger.debug(f"Could not get node {node_id}: {e}")
-                    continue
-            
-            if entity_dict:
-                # Generate embeddings for the updated entity descriptions
-                # This ensures both dense and sparse embeddings are created
-                logger.info(f"[COMMUNITY] Updating {len(entity_dict)} entities with new embeddings")
-                await self.entities_vdb.upsert(entity_dict)
+
+                        # Use same entity ID key as initial upsert
+                        entity_key = compute_mdhash_id(node_id, prefix='ent-')
+                        updates[entity_key] = {
+                            "entity_name": node_data.get("name", node_id),
+                            "entity_type": node_data.get("entity_type", "UNKNOWN"),
+                            "community_description": description,
+                        }
+                    except Exception as e:
+                        logger.debug(f"Could not update {node_id}: {e}")
+
+                if updates:
+                    logger.info(f"[COMMUNITY] Updating {len(updates)} entity payloads (preserving vectors)")
+                    await self.entities_vdb.update_payload(updates)
+            else:
+                # Original full re-embedding path
+                entity_dict = {}
+                for node_id in all_node_ids:
+                    # Get individual node data (batch method may not exist)
+                    try:
+                        node_data = await self.chunk_entity_relation_graph.get_node(node_id)
+                        if node_data:
+                            # Get description and ensure it's not empty for embedding
+                            description = node_data.get("description", "").strip()
+                            if not description:
+                                # Use entity name and type as fallback content
+                                entity_name = node_data.get("name", node_id).strip() if node_data.get("name") else node_id
+                                entity_type = node_data.get("entity_type", "UNKNOWN")
+                                description = f"{entity_name} ({entity_type})"
+
+                            # Final check to ensure description is not empty
+                            if description and description != " (UNKNOWN)":
+                                entity_dict[node_id] = {
+                                    "content": description,
+                                    "entity_name": node_data.get("name", node_id),
+                                    "entity_type": node_data.get("entity_type", "UNKNOWN"),
+                                }
+                            else:
+                                logger.debug(f"Skipping entity {node_id} with empty description")
+                    except Exception as e:
+                        # Node might not exist, skip it
+                        logger.debug(f"Could not get node {node_id}: {e}")
+                        continue
+
+                if entity_dict:
+                    # Generate embeddings for the updated entity descriptions
+                    # This ensures both dense and sparse embeddings are created
+                    logger.info(f"[COMMUNITY] Updating {len(entity_dict)} entities with new embeddings")
+                    await self.entities_vdb.upsert(entity_dict)
     
     def _global_config(self) -> dict:
         """Build global config with all required fields including function references."""

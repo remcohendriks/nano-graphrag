@@ -240,7 +240,30 @@ class QdrantVectorStorage(BaseVectorStorage):
                 logger.debug(f"Upserted batch {batch_num}/{total_batches}")
         
         logger.info(f"Successfully upserted {len(points)} points to Qdrant")
-    
+
+    async def update_payload(self, updates: Dict[str, Dict[str, Any]]) -> None:
+        """Update only payload fields without touching vectors."""
+        if not updates:
+            return
+
+        await self._ensure_collection()
+        client = await self._get_client()
+
+        for entity_id, payload_updates in updates.items():
+            point_id = xxhash.xxh64_intdigest(entity_id.encode())
+
+            # Never update fields that drive embeddings
+            safe_updates = {k: v for k, v in payload_updates.items() if k not in ["content", "embedding"]}
+            safe_updates["id"] = entity_id
+
+            await client.set_payload(
+                collection_name=self.namespace,
+                payload=safe_updates,
+                points=[point_id]
+            )
+
+        logger.info(f"Updated payload for {len(updates)} entities (vectors preserved)")
+
     async def _query_hybrid(self, client, query: str, query_embedding: list, top_k: int):
         """Execute hybrid search with sparse and dense vectors."""
         from ..llm.providers.sparse import SparseEmbeddingProvider
