@@ -172,40 +172,36 @@ async def test_entity_id_consistency():
 async def test_fallback_to_upsert_when_no_update_payload():
     """Test that system falls back to upsert when update_payload not available."""
 
-    # Test the fallback logic when update_payload is not available
     from unittest.mock import MagicMock
 
-    # Create a mock storage WITHOUT update_payload method
     mock_storage = AsyncMock()
     mock_storage.upsert = AsyncMock()
-    # Explicitly no update_payload attribute
 
-    # Simulate the conditional logic from graphrag.py
     use_payload_update = (
         hasattr(mock_storage, 'update_payload') and
-        False  # enable_hybrid_search = False
+        False
     )
 
     assert use_payload_update is False
 
-    # Simulate the fallback path (full re-embedding)
     if not use_payload_update:
+        entity_name = "TestEntity"
+        entity_key = compute_mdhash_id(entity_name, prefix='ent-')
         entity_dict = {
-            "TestEntity": {
+            entity_key: {
                 "content": "A test entity",
-                "entity_name": "TestEntity",
+                "entity_name": entity_name,
                 "entity_type": "THING"
             }
         }
         await mock_storage.upsert(entity_dict)
 
-    # Verify upsert was called (fallback behavior)
     assert mock_storage.upsert.called
 
-    # Verify the upsert data includes content
     upsert_call = mock_storage.upsert.call_args[0][0]
-    assert "TestEntity" in upsert_call
-    assert "content" in upsert_call["TestEntity"]
+    expected_key = compute_mdhash_id("TestEntity", prefix='ent-')
+    assert expected_key in upsert_call
+    assert "content" in upsert_call[expected_key]
 
 
 

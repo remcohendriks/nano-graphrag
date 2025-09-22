@@ -513,6 +513,7 @@ class GraphRAG:
                     await self.entities_vdb.update_payload(updates)
             else:
                 # Fallback: full re-embedding path (recreates vectors, used when hybrid disabled)
+                from nano_graphrag._utils import compute_mdhash_id
                 entity_dict = {}
                 for node_id in all_node_ids:
                     # Get individual node data (batch method may not exist)
@@ -529,9 +530,11 @@ class GraphRAG:
 
                             # Final check to ensure description is not empty
                             if description and description != " (UNKNOWN)":
-                                entity_dict[node_id] = {
+                                entity_name = node_data.get("name", node_id)
+                                entity_key = compute_mdhash_id(entity_name, prefix='ent-')
+                                entity_dict[entity_key] = {
                                     "content": description,
-                                    "entity_name": node_data.get("name", node_id),
+                                    "entity_name": entity_name,
                                     "entity_type": node_data.get("entity_type", "UNKNOWN"),
                                 }
                             else:

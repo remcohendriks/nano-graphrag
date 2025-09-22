@@ -497,8 +497,9 @@ class GraphRAGConfig:
             },
             'always_create_working_dir': True,
             'addon_params': {},
+            'hybrid_search': self.storage.hybrid_search,
         }
-        
+
         # Add HNSW-specific parameters if using hnswlib backend
         if self.storage.vector_backend == "hnswlib":
             config_dict['vector_db_storage_cls_kwargs'] = {
