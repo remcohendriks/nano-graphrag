@@ -252,8 +252,11 @@ class QdrantVectorStorage(BaseVectorStorage):
         for entity_id, payload_updates in updates.items():
             point_id = xxhash.xxh64_intdigest(entity_id.encode())
 
-            # Never update fields that drive embeddings
-            safe_updates = {k: v for k, v in payload_updates.items() if k not in ["content", "embedding"]}
+            filtered_fields = {"content", "embedding"}
+            if any(k in filtered_fields for k in payload_updates):
+                logger.debug(f"Filtered protected fields from payload update: {filtered_fields & payload_updates.keys()}")
+
+            safe_updates = {k: v for k, v in payload_updates.items() if k not in filtered_fields}
             safe_updates["id"] = entity_id
 
             await client.set_payload(

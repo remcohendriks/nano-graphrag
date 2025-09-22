@@ -129,6 +129,46 @@ async def test_post_community_uses_payload_update_when_hybrid():
 
 
 @pytest.mark.asyncio
+async def test_entity_id_consistency():
+    """Test that entity ID derivation is consistent between insert and update."""
+
+    from nano_graphrag._storage.vdb_qdrant import QdrantVectorStorage
+    from unittest.mock import MagicMock
+
+    storage = QdrantVectorStorage(
+        namespace="test_id_consistency",
+        global_config={"enable_hybrid_search": True},
+        embedding_func=MagicMock(),
+        meta_fields=set()
+    )
+
+    # Mock the client
+    storage.update_payload = AsyncMock()
+
+    # Test that we use entity name for ID, not node_id
+    entity_name = "Barack Obama"
+    node_id = "node_123"  # Different from entity name
+
+    # The correct entity key should use entity_name
+    expected_key = compute_mdhash_id(entity_name, prefix='ent-')
+
+    updates = {
+        expected_key: {
+            "entity_name": entity_name,
+            "entity_type": "PERSON",
+            "community_description": "Test description"
+        }
+    }
+
+    await storage.update_payload(updates)
+
+    # Verify the correct key was used
+    call_args = storage.update_payload.call_args[0][0]
+    assert expected_key in call_args
+    assert compute_mdhash_id(node_id, prefix='ent-') not in call_args
+
+
+@pytest.mark.asyncio
 async def test_fallback_to_upsert_when_no_update_payload():
     """Test that system falls back to upsert when update_payload not available."""
 

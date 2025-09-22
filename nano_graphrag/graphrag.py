@@ -476,10 +476,11 @@ class GraphRAG:
             schema = await self.chunk_entity_relation_graph.community_schema()
             all_node_ids = sorted({node_id for comm in schema.values() for node_id in comm.get("nodes", [])})
 
-            # Check if we should use payload-only updates (for hybrid search)
             use_payload_update = (
                 hasattr(self.entities_vdb, 'update_payload') and
-                self.global_config.get("enable_hybrid_search", False)
+                (self.config.storage.hybrid_search.enabled
+                 if hasattr(self.config.storage, 'hybrid_search')
+                 else self.global_config.get("enable_hybrid_search", False))
             )
 
             if use_payload_update:
@@ -497,10 +498,10 @@ class GraphRAG:
                             entity_type = node_data.get("entity_type", "UNKNOWN")
                             description = f"{entity_name} ({entity_type})"
 
-                        # Use same entity ID key as initial upsert
-                        entity_key = compute_mdhash_id(node_id, prefix='ent-')
+                        entity_name = node_data.get("name", node_id)
+                        entity_key = compute_mdhash_id(entity_name, prefix='ent-')
                         updates[entity_key] = {
-                            "entity_name": node_data.get("name", node_id),
+                            "entity_name": entity_name,
                             "entity_type": node_data.get("entity_type", "UNKNOWN"),
                             "community_description": description,
                         }
@@ -511,7 +512,7 @@ class GraphRAG:
                     logger.info(f"[COMMUNITY] Updating {len(updates)} entity payloads (preserving vectors)")
                     await self.entities_vdb.update_payload(updates)
             else:
-                # Original full re-embedding path
+                # Fallback: full re-embedding path (recreates vectors, used when hybrid disabled)
                 entity_dict = {}
                 for node_id in all_node_ids:
                     # Get individual node data (batch method may not exist)
