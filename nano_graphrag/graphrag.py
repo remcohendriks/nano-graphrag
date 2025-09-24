@@ -560,6 +560,7 @@ class GraphRAG:
             "best_model_func": self.best_model_func,
             "cheap_model_func": self.cheap_model_func,
             "convert_response_to_json_func": self.convert_response_to_json_func,
+            "query_config": self.config.query,
         }
     
     async def aquery(self, query: str, param: QueryParam = QueryParam()):

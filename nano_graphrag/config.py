@@ -333,6 +333,8 @@ class QueryConfig:
     enable_naive_rag: bool = False
     similarity_threshold: float = 0.2
     local_max_token_for_text_unit: int = 100000
+    local_template: Optional[str] = None
+    global_template: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> 'QueryConfig':
@@ -342,9 +344,11 @@ class QueryConfig:
             enable_global=os.getenv("QUERY_ENABLE_GLOBAL", "true").lower() == "true",
             enable_naive_rag=os.getenv("QUERY_ENABLE_NAIVE_RAG", "false").lower() == "true",
             similarity_threshold=float(os.getenv("QUERY_SIMILARITY_THRESHOLD", "0.2")),
-            local_max_token_for_text_unit=int(os.getenv("QUERY_LOCAL_MAX_TOKEN_FOR_TEXT_UNIT", "100000"))
+            local_max_token_for_text_unit=int(os.getenv("QUERY_LOCAL_MAX_TOKEN_FOR_TEXT_UNIT", "100000")),
+            local_template=os.getenv("QUERY_LOCAL_TEMPLATE"),
+            global_template=os.getenv("QUERY_GLOBAL_TEMPLATE")
         )
-    
+
     def __post_init__(self):
         """Validate configuration."""
         if not 0.0 <= self.similarity_threshold <= 1.0:

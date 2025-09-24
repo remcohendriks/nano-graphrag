@@ -505,6 +505,44 @@ The entity extraction system utilizes NDJSON (Newline Delimited JSON) format for
 
 This format ensures consistent entity name preservation across storage layers and eliminates parsing ambiguities inherent in delimiter-based formats.
 
+### Configurable Query Response Templates
+
+You can customize the response prompts for both local and global queries to match your application's needs:
+
+```python
+from nano_graphrag import GraphRAG
+from nano_graphrag.config import GraphRAGConfig, QueryConfig
+
+# Using inline templates
+config = GraphRAGConfig(
+    query=QueryConfig(
+        local_template="Answer based on context:\n{context_data}\n\nFormat: {response_type}",
+        global_template="Analyze the following:\n{context_data}"
+    )
+)
+
+# Using template files
+config = GraphRAGConfig(
+    query=QueryConfig(
+        local_template="./templates/local_response.txt",
+        global_template="./templates/global_response.txt"
+    )
+)
+
+# Or via environment variables
+# QUERY_LOCAL_TEMPLATE=./templates/local.txt
+# QUERY_GLOBAL_TEMPLATE="Inline template with {context_data}"
+
+rag = GraphRAG(config=config)
+```
+
+#### Available Placeholders
+
+- **Local Query**: `{context_data}`, `{response_type}`
+- **Global Query**: `{context_data}`
+
+Templates are validated at startup with automatic fallback to defaults if invalid. This allows customization of tone, format, and additional metadata without modifying source code.
+
 </details>
 
 <details>
