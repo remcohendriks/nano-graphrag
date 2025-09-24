@@ -9,7 +9,9 @@ from ._utils import (
     compute_mdhash_id,
     pack_user_ass_to_openai_messages,
     split_string_by_multi_markers,
-    TokenizerWrapper
+    TokenizerWrapper,
+    safe_float,
+    sanitize_str
 )
 from .base import (
     BaseGraphStorage,
@@ -264,21 +266,6 @@ async def extract_entities(
             if if_loop_result != "yes":
                 break
 
-        # Helper function for safe float conversion
-        def safe_float(value, default=1.0):
-            try:
-                return float(value) if value is not None else default
-            except (ValueError, TypeError):
-                return default
-
-        def sanitize_str(text):
-            if not text:
-                return ""
-            import html
-            text = html.unescape(text)
-            text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
-            return text.strip()
-
         # Parse NDJSON format
         maybe_nodes = defaultdict(list)
         maybe_edges = defaultdict(list)
@@ -479,15 +466,6 @@ async def extract_entities_from_chunks(
                     combined.append('\n')
                 combined.append(resp)
         response = ''.join(combined)
-
-        # Helper function for minimal sanitization
-        def sanitize_str(text):
-            if not text:
-                return ""
-            import html
-            text = html.unescape(text)
-            text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
-            return text.strip()
 
         # Parse NDJSON format
         for line in response.strip().split('\n'):

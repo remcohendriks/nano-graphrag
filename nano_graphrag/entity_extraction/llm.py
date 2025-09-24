@@ -2,14 +2,15 @@
 
 import re
 import json
-import html
 from typing import Dict, Any, Optional, List
 from collections import defaultdict
 
 from .base import BaseEntityExtractor, ExtractorConfig, ExtractionResult, TextChunkSchema
 from nano_graphrag._utils import (
     logger,
-    pack_user_ass_to_openai_messages
+    pack_user_ass_to_openai_messages,
+    safe_float,
+    sanitize_str
 )
 from nano_graphrag.prompt import GRAPH_FIELD_SEP, PROMPTS
 
@@ -133,20 +134,6 @@ class LLMEntityExtractor(BaseEntityExtractor):
                 if_loop_result = if_loop_result.strip().strip('"').strip("'").lower()
                 if if_loop_result != "yes":
                     break
-
-        # Helper function for safe float conversion
-        def safe_float(value, default=1.0):
-            try:
-                return float(value) if value is not None else default
-            except (ValueError, TypeError):
-                return default
-
-        def sanitize_str(text):
-            if not text:
-                return ""
-            text = html.unescape(text)
-            text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
-            return text.strip()
 
         # Parse NDJSON format
         nodes = {}
