@@ -2,6 +2,7 @@
 
 import json
 import asyncio
+from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from collections import Counter
 from ._utils import (
@@ -21,6 +22,35 @@ from .base import (
 )
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
 from .schemas import LocalQueryContext, GlobalQueryContext, NodeView
+
+
+def _load_template(template_config: Optional[str]) -> Optional[str]:
+    """Load template from file or return inline string."""
+    if not template_config:
+        return None
+
+    if template_config.startswith(('.', '/')) or '\\' in template_config:
+        try:
+            path = Path(template_config)
+            if path.exists():
+                return path.read_text(encoding='utf-8')
+            else:
+                logger.warning(f"Template file not found: {template_config}, using default")
+                return None
+        except Exception as e:
+            logger.warning(f"Failed to load template from {template_config}: {e}, using default")
+            return None
+
+    return template_config
+
+
+def _validate_template(template: str, required_placeholders: List[str]) -> bool:
+    """Validate that template contains required placeholders."""
+    for placeholder in required_placeholders:
+        if f'{{{placeholder}}}' not in template:
+            logger.warning(f"Template missing required placeholder: {{{placeholder}}}")
+            return False
+    return True
 
 
 async def _find_most_related_community_from_entities(
@@ -317,10 +347,23 @@ async def local_query(
         return context
     if context is None:
         return PROMPTS["fail_response"]
-    sys_prompt_temp = PROMPTS["local_rag_response"]
-    sys_prompt = sys_prompt_temp.format(
-        context_data=context, response_type=query_param.response_type
-    )
+
+    custom_template = None
+    if hasattr(global_config.get('query_config', {}), 'local_template'):
+        custom_template = _load_template(global_config['query_config'].local_template)
+        if custom_template and not _validate_template(custom_template, ['context_data', 'response_type']):
+            custom_template = None
+
+    sys_prompt_temp = custom_template if custom_template else PROMPTS["local_rag_response"]
+    try:
+        sys_prompt = sys_prompt_temp.format(
+            context_data=context, response_type=query_param.response_type
+        )
+    except KeyError as e:
+        logger.warning(f"Template formatting failed with {e}, using default template")
+        sys_prompt = PROMPTS["local_rag_response"].format(
+            context_data=context, response_type=query_param.response_type
+        )
     response = await use_model_func(
         query,
         system_prompt=sys_prompt,
@@ -360,8 +403,19 @@ async def _map_global_communities(
                 ]
             )
         community_context = list_of_list_to_csv(communities_section_list)
-        sys_prompt_temp = PROMPTS["global_map_rag_points"]
-        sys_prompt = sys_prompt_temp.format(context_data=community_context)
+
+        custom_template = None
+        if hasattr(global_config.get('query_config', {}), 'global_template'):
+            custom_template = _load_template(global_config['query_config'].global_template)
+            if custom_template and not _validate_template(custom_template, ['context_data']):
+                custom_template = None
+
+        sys_prompt_temp = custom_template if custom_template else PROMPTS["global_map_rag_points"]
+        try:
+            sys_prompt = sys_prompt_temp.format(context_data=community_context)
+        except KeyError as e:
+            logger.warning(f"Template formatting failed with {e}, using default template")
+            sys_prompt = PROMPTS["global_map_rag_points"].format(context_data=community_context)
         response = await use_model_func(
             query,
             system_prompt=sys_prompt,
