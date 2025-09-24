@@ -1,5 +1,40 @@
 [
   {
+    "timestamp": "2025-09-24T19:23:05.148090+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "insert": 648.7665388584137,
+      "global_query": 56.13263702392578,
+      "local_query": 23.468211889266968,
+      "reload": 11.021082878112793,
+      "total": 740.3850119113922
+    },
+    "counts": {
+      "nodes": 239,
+      "edges": 161,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "naive query failed: Naive RAG mode is disabled in config"
+    ],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "failed",
+      "reload": "passed"
+    }
+  },
+  {
     "timestamp": "2025-09-21T12:56:10.875411+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",

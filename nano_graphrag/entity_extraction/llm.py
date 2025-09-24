@@ -1,16 +1,15 @@
 """LLM prompt-based entity extraction strategy."""
 
 import re
+import json
+import html
 from typing import Dict, Any, Optional, List
 from collections import defaultdict
 
 from .base import BaseEntityExtractor, ExtractorConfig, ExtractionResult, TextChunkSchema
 from nano_graphrag._utils import (
     logger,
-    clean_str,
-    split_string_by_multi_markers,
-    pack_user_ass_to_openai_messages,
-    is_float_regex
+    pack_user_ass_to_openai_messages
 )
 from nano_graphrag.prompt import GRAPH_FIELD_SEP, PROMPTS
 
@@ -51,8 +50,6 @@ class LLMEntityExtractor(BaseEntityExtractor):
         """Extract from single text using LLM prompts with gleaning."""
         entity_extract_prompt = PROMPTS["entity_extraction"]
         context_base = dict(
-            tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
-            record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
             completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
             entity_types=",".join(self.config.entity_types),
             input_text=text
@@ -122,6 +119,9 @@ class LLMEntityExtractor(BaseEntityExtractor):
             for glean_index in range(self.config.max_gleaning):
                 glean_result = await self.config.model_func(continue_prompt, history=history)
                 history += pack_user_ass_to_openai_messages(continue_prompt, glean_result, False)
+                # Ensure newline between responses for proper NDJSON parsing
+                if final_result and not final_result.endswith('\n'):
+                    final_result += '\n'
                 final_result += glean_result
 
                 if glean_index == self.config.max_gleaning - 1:
@@ -134,62 +134,66 @@ class LLMEntityExtractor(BaseEntityExtractor):
                 if if_loop_result != "yes":
                     break
 
-        # Parse extraction results
-        records = split_string_by_multi_markers(
-            final_result,
-            [context_base["record_delimiter"], context_base["completion_delimiter"]],
-        )
+        # Helper function for safe float conversion
+        def safe_float(value, default=1.0):
+            try:
+                return float(value) if value is not None else default
+            except (ValueError, TypeError):
+                return default
 
-        logger.info(f"[EXTRACT] Chunk {chunk_id} - Parsed {len(records)} records from LLM output")
-        if records:
-            logger.debug(f"[EXTRACT] Sample records (first 3): {records[:3]}")
+        def sanitize_str(text):
+            if not text:
+                return ""
+            text = html.unescape(text)
+            text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
+            return text.strip()
 
+        # Parse NDJSON format
         nodes = {}
         edges = []
+        entity_count = 0
+        relationship_count = 0
 
-        for record in records:
-            record_match = re.search(r"\((.*)\)", record)
-            if record_match is None:
+        lines = final_result.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line or context_base["completion_delimiter"] in line:
                 continue
-            record_content = record_match.group(1)
-            record_attributes = split_string_by_multi_markers(
-                record_content, [context_base["tuple_delimiter"]]
-            )
 
-            # Handle entity extraction
-            if len(record_attributes) >= 4 and record_attributes[0] == '"entity"':
-                entity_name = clean_str(record_attributes[1].upper())
-                if entity_name.strip():
-                    entity_type = clean_str(record_attributes[2].upper())
-                    entity_description = clean_str(record_attributes[3])
+            try:
+                obj = json.loads(line)
 
-                    nodes[entity_name] = {
-                        "entity_name": entity_name,
-                        "entity_type": entity_type,
-                        "description": entity_description,
-                        "source_id": chunk_id
-                    }
+                if obj.get('type') == 'entity':
+                    entity_name = sanitize_str(obj.get('name', '')).upper()
+                    if entity_name:
+                        nodes[entity_name] = {
+                            "entity_name": entity_name,
+                            "entity_type": sanitize_str(obj.get('entity_type', 'UNKNOWN')),
+                            "description": sanitize_str(obj.get('description', '')),
+                            "source_id": chunk_id
+                        }
+                        entity_count += 1
 
-            # Handle relationship extraction
-            elif len(record_attributes) >= 5 and record_attributes[0] == '"relationship"':
-                source = clean_str(record_attributes[1].upper())
-                target = clean_str(record_attributes[2].upper())
-                edge_description = clean_str(record_attributes[3])
-                weight = (
-                    float(record_attributes[-1])
-                    if is_float_regex(record_attributes[-1])
-                    else 1.0
-                )
+                elif obj.get('type') == 'relationship':
+                    source = sanitize_str(obj.get('source', '')).upper()
+                    target = sanitize_str(obj.get('target', '')).upper()
+                    if source and target:
+                        edges.append((
+                            source,
+                            target,
+                            {
+                                "weight": safe_float(obj.get('strength'), 1.0),
+                                "description": sanitize_str(obj.get('description', '')),
+                                "source_id": chunk_id
+                            }
+                        ))
+                        relationship_count += 1
 
-                edges.append((
-                    source,
-                    target,
-                    {
-                        "weight": weight,
-                        "description": edge_description,
-                        "source_id": chunk_id
-                    }
-                ))
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.debug(f"Failed to parse line: {line[:100]}... Error: {e}")
+                continue
+
+        logger.info(f"[EXTRACT] Chunk {chunk_id} - Parsed {entity_count} entities, {relationship_count} relationships")
 
         # Log extraction results for this chunk
         logger.info(f"[EXTRACT] Chunk {chunk_id} results: {len(nodes)} entities, {len(edges)} relationships")

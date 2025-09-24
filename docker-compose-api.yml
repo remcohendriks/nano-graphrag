@@ -49,7 +49,12 @@ services:
       # LLM settings (use environment variables)
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       LLM_PROVIDER: openai
-      LLM_MODEL: gpt-5-mini
+      # LLM_MODEL: gpt-5-mini
+      LLM_MODEL: qwen3-30b-a3b-instruct-2507
+      LLM_BASE_URL: http://192.168.1.5:9090/v1
+      LLM_MAX_CONCURRENT: 1
+      LLM_REQUEST_TIMEOUT: 120.0
+
       EMBEDDING_PROVIDER: openai
       EMBEDDING_MODEL: text-embedding-3-large
       EMBEDDING_DIMENSION: 3072

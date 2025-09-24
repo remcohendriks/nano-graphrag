@@ -6,9 +6,7 @@ from typing import Union, Dict, List, Optional, Any, Tuple
 from collections import Counter, defaultdict
 from ._utils import (
     logger,
-    clean_str,
     compute_mdhash_id,
-    is_float_regex,
     pack_user_ass_to_openai_messages,
     split_string_by_multi_markers,
     TokenizerWrapper
@@ -91,58 +89,6 @@ async def _handle_entity_relation_summary(
     logger.debug(f"Trigger summary: {entity_or_relation_name}")
     summary = await use_llm_func(use_prompt, max_tokens=summary_max_tokens)
     return summary
-
-
-async def _handle_single_entity_extraction(
-    record_attributes: List[str],
-    chunk_key: str,
-) -> Optional[Dict[str, Any]]:
-    if len(record_attributes) < 4:
-        logger.debug(f"[EXTRACT] Entity parse failed - not enough attributes: {record_attributes}")
-        return None
-    if record_attributes[0] != '"entity"':
-        logger.debug(f"[EXTRACT] Not an entity record: {record_attributes[0]}")
-        return None
-    # add this record as a node in the G
-    entity_name = clean_str(record_attributes[1].upper())
-    if not entity_name.strip():
-        return None
-    entity_type = clean_str(record_attributes[2].upper())
-    entity_description = clean_str(record_attributes[3])
-    entity_source_id = chunk_key
-    return dict(
-        entity_name=entity_name,
-        entity_type=entity_type,
-        description=entity_description,
-        source_id=entity_source_id,
-    )
-
-
-async def _handle_single_relationship_extraction(
-    record_attributes: List[str],
-    chunk_key: str,
-) -> Optional[Dict[str, Any]]:
-    if len(record_attributes) < 5:
-        logger.debug(f"[EXTRACT] Relationship parse failed - not enough attributes: {record_attributes}")
-        return None
-    if record_attributes[0] != '"relationship"':
-        logger.debug(f"[EXTRACT] Not a relationship record: {record_attributes[0]}")
-        return None
-    # add this record as edge
-    source = clean_str(record_attributes[1].upper())
-    target = clean_str(record_attributes[2].upper())
-    edge_description = clean_str(record_attributes[3])
-    edge_source_id = chunk_key
-    weight = (
-        float(record_attributes[-1]) if is_float_regex(record_attributes[-1]) else 1.0
-    )
-    return dict(
-        src_id=source,
-        tgt_id=target,
-        weight=weight,
-        description=edge_description,
-        source_id=edge_source_id,
-    )
 
 
 async def _merge_nodes_then_upsert(
@@ -230,7 +176,7 @@ async def _merge_edges_then_upsert(
                 node_data={
                     "source_id": source_id,
                     "description": description,
-                    "entity_type": '"UNKNOWN"',
+                    "entity_type": "UNKNOWN",
                 },
             )
     description = await _handle_entity_relation_summary(
@@ -276,8 +222,6 @@ async def extract_entities(
 
     entity_extract_prompt = PROMPTS["entity_extraction"]
     context_base = dict(
-        tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
-        record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
         entity_types=",".join(PROMPTS["DEFAULT_ENTITY_TYPES"]),
     )
@@ -306,6 +250,9 @@ async def extract_entities(
             glean_result = await use_llm_func(continue_prompt, history=history)
 
             history += pack_user_ass_to_openai_messages(continue_prompt, glean_result, using_amazon_bedrock)
+            # Ensure newline between responses for proper NDJSON parsing
+            if final_result and not final_result.endswith('\n'):
+                final_result += '\n'
             final_result += glean_result
             if now_glean_index == entity_extract_max_gleaning - 1:
                 break
@@ -317,42 +264,66 @@ async def extract_entities(
             if if_loop_result != "yes":
                 break
 
-        records = split_string_by_multi_markers(
-            final_result,
-            [context_base["record_delimiter"], context_base["completion_delimiter"]],
-        )
+        # Helper function for safe float conversion
+        def safe_float(value, default=1.0):
+            try:
+                return float(value) if value is not None else default
+            except (ValueError, TypeError):
+                return default
 
-        logger.info(f"[EXTRACT] Chunk {chunk_key} - Parsed {len(records)} records from LLM output")
+        def sanitize_str(text):
+            if not text:
+                return ""
+            import html
+            text = html.unescape(text)
+            text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
+            return text.strip()
 
+        # Parse NDJSON format
         maybe_nodes = defaultdict(list)
         maybe_edges = defaultdict(list)
 
-        # Log sample records for debugging
-        if records:
-            logger.debug(f"[EXTRACT] Sample records (first 3): {records[:3]}")
+        lines = final_result.strip().split('\n')
+        entity_count = 0
+        relationship_count = 0
 
-        for record in records:
-            record = re.search(r"\((.*)\)", record)
-            if record is None:
-                continue
-            record = record.group(1)
-            record_attributes = split_string_by_multi_markers(
-                record, [context_base["tuple_delimiter"]]
-            )
-            if_entities = await _handle_single_entity_extraction(
-                record_attributes, chunk_key
-            )
-            if if_entities is not None:
-                maybe_nodes[if_entities["entity_name"]].append(if_entities)
+        for line in lines:
+            line = line.strip()
+            if not line or context_base["completion_delimiter"] in line:
                 continue
 
-            if_relation = await _handle_single_relationship_extraction(
-                record_attributes, chunk_key
-            )
-            if if_relation is not None:
-                maybe_edges[(if_relation["src_id"], if_relation["tgt_id"])].append(
-                    if_relation
-                )
+            try:
+                obj = json.loads(line)
+
+                if obj.get('type') == 'entity':
+                    entity_name = sanitize_str(obj.get('name', '')).upper()
+                    if entity_name:
+                        maybe_nodes[entity_name].append({
+                            'entity_name': entity_name,
+                            'entity_type': sanitize_str(obj.get('entity_type', 'UNKNOWN')),
+                            'description': sanitize_str(obj.get('description', '')),
+                            'source_id': chunk_key
+                        })
+                        entity_count += 1
+
+                elif obj.get('type') == 'relationship':
+                    src = sanitize_str(obj.get('source', '')).upper()
+                    tgt = sanitize_str(obj.get('target', '')).upper()
+                    if src and tgt:
+                        maybe_edges[(src, tgt)].append({
+                            'src_id': src,
+                            'tgt_id': tgt,
+                            'weight': safe_float(obj.get('strength'), 1.0),
+                            'description': sanitize_str(obj.get('description', '')),
+                            'source_id': chunk_key
+                        })
+                        relationship_count += 1
+
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.debug(f"Failed to parse line: {line[:100]}... Error: {e}")
+                continue
+
+        logger.info(f"[EXTRACT] Chunk {chunk_key} - Parsed {entity_count} entities, {relationship_count} relationships")
 
         # Log extraction results for this chunk
         logger.info(f"[EXTRACT] Chunk {chunk_key} results: {len(maybe_nodes)} entities, {len(maybe_edges)} relationships")
@@ -426,13 +397,14 @@ async def extract_entities(
     if entity_vdb is not None:
         logger.info(f"[EXTRACT] Updating entity vector DB with {len(all_entities_data)} entities...")
         vdb_start = time.time()
-        data_for_vdb = {
-            compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
-                "content": dp["entity_name"] + dp["description"],
-                "entity_name": dp["entity_name"],
+        data_for_vdb = {}
+        for dp in all_entities_data:
+            entity_name_clean = dp["entity_name"].strip('"').strip("'")
+            entity_id = compute_mdhash_id(entity_name_clean, prefix="ent-")
+            data_for_vdb[entity_id] = {
+                "content": f"{entity_name_clean} {dp['description']}",
+                "entity_name": entity_name_clean,
             }
-            for dp in all_entities_data
-        }
         await entity_vdb.upsert(data_for_vdb)
         vdb_time = time.time() - vdb_start
         logger.info(f"[EXTRACT] Vector DB updated in {vdb_time:.2f}s")
@@ -469,81 +441,82 @@ async def extract_entities_from_chunks(
     
     entity_extract_prompt = PROMPTS["entity_extraction"]
     context_base = dict(
-        tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
-        record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
         entity_types=PROMPTS["DEFAULT_ENTITY_TYPES"]
     )
-    
+
     all_entities = {}
     all_relationships = []
-    
+
     for chunk in chunks:
         context = dict(
             input_text=chunk["content"],
             **context_base
         )
-        
+
         logger.debug(f"Processing chunk for entity extraction, max_gleaning={max_gleaning}")
-        
+
         # Always do at least one extraction pass
         response = await model_func(
             entity_extract_prompt.format(**context)
         )
-        
+
         # Accumulate responses from gleaning passes
         all_responses = [response]
-        
+
         # Then do additional gleaning passes if configured
         for glean_index in range(max_gleaning):
             glean_response = await model_func(
                 PROMPTS.get("entity_continue_extraction", PROMPTS.get("entity_extraction", "")).format(**context)
             )
             all_responses.append(glean_response)
-        
-        # Combine all responses with record delimiter to ensure proper parsing
-        response = context_base["record_delimiter"].join(all_responses)
-        
-        # Parse entities and relationships from delimiter format response
-        # The LLM returns format like: ("entity"<|>NAME<|>TYPE<|>DESC)##("relationship"<|>...)
-        records = split_string_by_multi_markers(
-            response,
-            [context_base["record_delimiter"], context_base["completion_delimiter"]],
-        )
-        
-        # Filter out empty records
-        records = [r for r in records if r.strip()]
-        
-        for record in records:
-            if not record.strip():
+
+        # Combine all responses (each should be NDJSON) with proper newline separation
+        combined = []
+        for resp in all_responses:
+            if resp:
+                if combined and not combined[-1].endswith('\n'):
+                    combined.append('\n')
+                combined.append(resp)
+        response = ''.join(combined)
+
+        # Helper function for minimal sanitization
+        def sanitize_str(text):
+            if not text:
+                return ""
+            import html
+            text = html.unescape(text)
+            text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
+            return text.strip()
+
+        # Parse NDJSON format
+        for line in response.strip().split('\n'):
+            line = line.strip()
+            if not line or context_base["completion_delimiter"] in line:
                 continue
-            # Extract content between parentheses
-            match = re.search(r'\((.*)\)', record)
-            if match is None:
+
+            try:
+                obj = json.loads(line)
+
+                if obj.get('type') == 'entity':
+                    entity_name = sanitize_str(obj.get('name', '')).upper()
+                    if entity_name and entity_name not in all_entities:
+                        all_entities[entity_name] = {
+                            "name": entity_name,
+                            "type": sanitize_str(obj.get('entity_type', 'UNKNOWN')),
+                            "description": sanitize_str(obj.get('description', ''))
+                        }
+                elif obj.get('type') == 'relationship':
+                    src = sanitize_str(obj.get('source', '')).upper()
+                    tgt = sanitize_str(obj.get('target', '')).upper()
+                    if src and tgt:
+                        all_relationships.append({
+                            "source": src,
+                            "target": tgt,
+                            "description": sanitize_str(obj.get('description', ''))
+                        })
+            except (json.JSONDecodeError, ValueError):
                 continue
-            record_content = match.group(1)
-            # Split by tuple delimiter
-            attributes = split_string_by_multi_markers(
-                record_content, [context_base["tuple_delimiter"]]
-            )
-            
-            if len(attributes) >= 4 and attributes[0] == '"entity"':
-                entity_name = clean_str(attributes[1].upper())
-                if entity_name and entity_name not in all_entities:
-                    all_entities[entity_name] = {
-                        "name": entity_name,
-                        "type": clean_str(attributes[2].upper()),
-                        "description": clean_str(attributes[3])
-                    }
-            elif len(attributes) >= 4 and attributes[0] == '"relationship"':
-                src = clean_str(attributes[1].upper())
-                tgt = clean_str(attributes[2].upper())
-                if src and tgt:
-                    all_relationships.append({
-                        "source": src,
-                        "target": tgt,
-                        "description": clean_str(attributes[3])
-                    })
     
     # Convert to nodes and edges format
     nodes = [

@@ -104,7 +104,8 @@ class QdrantVectorStorage(BaseVectorStorage):
                             )
                         },
                         sparse_vectors_config={
-                            "sparse": self._models.SparseVectorParams()
+                            "sparse": self._models.SparseVectorParams(),
+                            "sparse_name": self._models.SparseVectorParams()
                         },
                         **self._collection_params
                     )
@@ -162,12 +163,16 @@ class QdrantVectorStorage(BaseVectorStorage):
 
         # Generate sparse embeddings if hybrid enabled
         sparse_embeddings = None
+        sparse_name_embeddings = None
         if self._enable_hybrid:
             from ..llm.providers.sparse import SparseEmbeddingProvider
             provider = SparseEmbeddingProvider(config=self._hybrid_config)
             all_contents = [d.get("content", "") for d in data.values()]
             sparse_embeddings = await provider.embed(all_contents)
-            logger.debug(f"Generated sparse embeddings for {len(all_contents)} documents")
+
+            entity_names = [d.get("entity_name", "") for d in data.values()]
+            sparse_name_embeddings = await provider.embed(entity_names)
+            logger.debug(f"Generated sparse embeddings for {len(all_contents)} documents and names")
 
         # Second pass: create points
         embedding_idx = 0
@@ -207,6 +212,10 @@ class QdrantVectorStorage(BaseVectorStorage):
                     "sparse": self._models.SparseVector(
                         indices=sparse_embeddings[sparse_idx]["indices"],
                         values=sparse_embeddings[sparse_idx]["values"]
+                    ),
+                    "sparse_name": self._models.SparseVector(
+                        indices=sparse_name_embeddings[sparse_idx]["indices"],
+                        values=sparse_name_embeddings[sparse_idx]["values"]
                     )
                 }
                 sparse_idx += 1
@@ -282,6 +291,14 @@ class QdrantVectorStorage(BaseVectorStorage):
         return await client.query_points(
             collection_name=self.namespace,
             prefetch=[
+                self._models.Prefetch(
+                    query=self._models.SparseVector(
+                        indices=sparse_data["indices"],
+                        values=sparse_data["values"]
+                    ),
+                    using="sparse_name",
+                    limit=min(int(top_k * 3.0), 150),  # Higher weight for name matches
+                ),
                 self._models.Prefetch(
                     query=self._models.SparseVector(
                         indices=sparse_data["indices"],

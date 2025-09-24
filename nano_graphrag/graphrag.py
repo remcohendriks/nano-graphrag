@@ -317,15 +317,16 @@ class GraphRAG:
 
             data_for_vdb = {}
             for dp in all_entities_data:
-                entity_id = compute_mdhash_id(dp["entity_name"], prefix="ent-")
+                entity_name_clean = dp["entity_name"].strip('"').strip("'")
+                entity_id = compute_mdhash_id(entity_name_clean, prefix="ent-")
                 if enable_type_prefix and "entity_type" in dp:
-                    content = dp["entity_name"] + f"[{dp['entity_type']}] " + dp["description"]
+                    content = f"{entity_name_clean} [{dp['entity_type']}] {dp['description']}"
                 else:
-                    content = dp["entity_name"] + dp["description"]
+                    content = f"{entity_name_clean} {dp['description']}"
 
                 data_for_vdb[entity_id] = {
                     "content": content,
-                    "entity_name": dp["entity_name"],
+                    "entity_name": entity_name_clean,
                 }
 
             await entity_vdb.upsert(data_for_vdb)
@@ -499,9 +500,10 @@ class GraphRAG:
                             description = f"{entity_name} ({entity_type})"
 
                         entity_name = node_data.get("name", node_id)
-                        entity_key = compute_mdhash_id(entity_name, prefix='ent-')
+                        entity_name_clean = entity_name.strip('"').strip("'")
+                        entity_key = compute_mdhash_id(entity_name_clean, prefix='ent-')
                         updates[entity_key] = {
-                            "entity_name": entity_name,
+                            "entity_name": entity_name_clean,
                             "entity_type": node_data.get("entity_type", "UNKNOWN"),
                             "community_description": description,
                         }
@@ -531,10 +533,11 @@ class GraphRAG:
                             # Final check to ensure description is not empty
                             if description and description != " (UNKNOWN)":
                                 entity_name = node_data.get("name", node_id)
-                                entity_key = compute_mdhash_id(entity_name, prefix='ent-')
+                                entity_name_clean = entity_name.strip('"').strip("'")
+                                entity_key = compute_mdhash_id(entity_name_clean, prefix='ent-')
                                 entity_dict[entity_key] = {
-                                    "content": description,
-                                    "entity_name": entity_name,
+                                    "content": f"{entity_name_clean} {description}",
+                                    "entity_name": entity_name_clean,
                                     "entity_type": node_data.get("entity_type", "UNKNOWN"),
                                 }
                             else:

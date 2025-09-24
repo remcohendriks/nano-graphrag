@@ -217,6 +217,23 @@ async def _build_local_query_context(
     results = await entities_vdb.query(query, top_k=query_param.top_k)
     if not len(results):
         return None
+    # Log ranked entities (top 20) as returned by vector search
+    try:
+        max_display = min(20, len(results))
+        # Basic score stats
+        scores = [r.get("score") for r in results if isinstance(r.get("score"), (int, float))]
+        if scores:
+            logger.info(
+                f"[RANK] Entities returned: {len(results)} | score min={min(scores):.3f} "
+                f"max={max(scores):.3f} mean={sum(scores)/len(scores):.3f}"
+            )
+        for i, r in enumerate(results[:max_display]):
+            name = r.get("entity_name") or r.get("id") or "unknown"
+            score = r.get("score", 0.0)
+            rid = r.get("id", "")
+            logger.info(f"[RANK] {i+1:02d}. {name} (score={score:.3f}) id={rid}")
+    except Exception as e:
+        logger.debug(f"[RANK] Failed to log ranked entities: {e}")
     node_datas = await knowledge_graph_inst.get_nodes_batch([r["entity_name"] for r in results])
     if not all([n is not None for n in node_datas]):
         logger.warning("Some nodes are missing, maybe the storage is damaged")

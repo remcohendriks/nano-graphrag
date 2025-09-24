@@ -151,7 +151,7 @@ async def test_qdrant_hybrid_query():
             mock_client.query_points.assert_called_once()
             call_args = mock_client.query_points.call_args[1]
             assert "prefetch" in call_args  # Hybrid uses prefetch
-            assert len(call_args["prefetch"]) == 2  # Dense and sparse
+            assert len(call_args["prefetch"]) == 3  # Name, content, and dense
 
             # Check results
             assert len(results) == 1
