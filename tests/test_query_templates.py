@@ -52,6 +52,15 @@ class TestTemplateUtilities:
         template = "Has {context_data}, {response_type}, and {extra}"
         assert _validate_template(template, ['context_data', 'response_type']) is True
 
+    def test_template_format_with_extra_placeholders(self):
+        """Test that format fails with KeyError when extra placeholders present."""
+        template = "Context: {context_data}\nType: {response_type}\nExtra: {undefined_var}"
+
+        assert _validate_template(template, ['context_data', 'response_type']) is True
+
+        with pytest.raises(KeyError):
+            template.format(context_data="test", response_type="test")
+
 
 @pytest.mark.asyncio
 class TestLocalQueryTemplates:
@@ -63,13 +72,12 @@ class TestLocalQueryTemplates:
         mock_text_chunks = AsyncMock()
         mock_tokenizer = MagicMock()
 
-        # Mock the context building
         with patch('nano_graphrag._query._build_local_query_context') as mock_build:
             mock_build.return_value = "Test context"
 
             global_config = {
                 'best_model_func': AsyncMock(return_value="Response"),
-                'query_config': QueryConfig()  # No templates configured
+                'query_config': QueryConfig()
             }
 
             result = await local_query(
@@ -83,7 +91,6 @@ class TestLocalQueryTemplates:
                 global_config
             )
 
-            # Should use default template
             global_config['best_model_func'].assert_called_once()
             call_args = global_config['best_model_func'].call_args
             assert 'You are a helpful assistant' in call_args[1]['system_prompt']
@@ -117,7 +124,6 @@ class TestLocalQueryTemplates:
                 global_config
             )
 
-            # Should use custom template
             global_config['best_model_func'].assert_called_once()
             call_args = global_config['best_model_func'].call_args
             expected_prompt = custom_template.format(
@@ -157,7 +163,6 @@ class TestLocalQueryTemplates:
                 global_config
             )
 
-            # Should use file template
             global_config['best_model_func'].assert_called_once()
             call_args = global_config['best_model_func'].call_args
             expected_prompt = template_content.format(
@@ -168,7 +173,6 @@ class TestLocalQueryTemplates:
 
     async def test_local_query_invalid_template_fallback(self):
         """Test local query falls back to default when template invalid."""
-        # Template missing required placeholder
         invalid_template = "Missing placeholders template"
 
         mock_kg = AsyncMock()
@@ -197,8 +201,42 @@ class TestLocalQueryTemplates:
                     global_config
                 )
 
-                # Should warn and use default
                 mock_logger.warning.assert_called()
+                global_config['best_model_func'].assert_called_once()
+                call_args = global_config['best_model_func'].call_args
+                assert 'You are a helpful assistant' in call_args[1]['system_prompt']
+
+    async def test_local_query_extra_placeholders_fallback(self):
+        """Test local query falls back to default when template has extra placeholders."""
+        template_with_extra = "Context: {context_data}\nType: {response_type}\nExtra: {undefined_var}"
+
+        mock_kg = AsyncMock()
+        mock_entities_vdb = AsyncMock()
+        mock_community_reports = AsyncMock()
+        mock_text_chunks = AsyncMock()
+        mock_tokenizer = MagicMock()
+
+        with patch('nano_graphrag._query._build_local_query_context') as mock_build:
+            mock_build.return_value = "Test context"
+
+            global_config = {
+                'best_model_func': AsyncMock(return_value="Response"),
+                'query_config': QueryConfig(local_template=template_with_extra)
+            }
+
+            with patch('nano_graphrag._query.logger') as mock_logger:
+                result = await local_query(
+                    "test query",
+                    mock_kg,
+                    mock_entities_vdb,
+                    mock_community_reports,
+                    mock_text_chunks,
+                    QueryParam(),
+                    mock_tokenizer,
+                    global_config
+                )
+
+                assert any('formatting failed' in str(call) for call in mock_logger.warning.call_args_list)
                 global_config['best_model_func'].assert_called_once()
                 call_args = global_config['best_model_func'].call_args
                 assert 'You are a helpful assistant' in call_args[1]['system_prompt']
@@ -211,7 +249,7 @@ class TestGlobalQueryTemplates:
         custom_template = "Global analysis:\n{context_data}"
 
         mock_kg = AsyncMock()
-        mock_kg.community_schema.return_value = {}  # Empty community schema
+        mock_kg.community_schema.return_value = {}
         mock_kg.nodes_to_fetch_batch.return_value = []
         mock_entities_vdb = AsyncMock()
         mock_entities_vdb.retrieval_with_scores.return_value = []
@@ -238,5 +276,4 @@ class TestGlobalQueryTemplates:
             global_config
         )
 
-        # Since no communities, should return fail response
         assert result is not None

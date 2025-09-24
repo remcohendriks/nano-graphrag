@@ -355,9 +355,15 @@ async def local_query(
             custom_template = None
 
     sys_prompt_temp = custom_template if custom_template else PROMPTS["local_rag_response"]
-    sys_prompt = sys_prompt_temp.format(
-        context_data=context, response_type=query_param.response_type
-    )
+    try:
+        sys_prompt = sys_prompt_temp.format(
+            context_data=context, response_type=query_param.response_type
+        )
+    except KeyError as e:
+        logger.warning(f"Template formatting failed with {e}, using default template")
+        sys_prompt = PROMPTS["local_rag_response"].format(
+            context_data=context, response_type=query_param.response_type
+        )
     response = await use_model_func(
         query,
         system_prompt=sys_prompt,
@@ -405,7 +411,11 @@ async def _map_global_communities(
                 custom_template = None
 
         sys_prompt_temp = custom_template if custom_template else PROMPTS["global_map_rag_points"]
-        sys_prompt = sys_prompt_temp.format(context_data=community_context)
+        try:
+            sys_prompt = sys_prompt_temp.format(context_data=community_context)
+        except KeyError as e:
+            logger.warning(f"Template formatting failed with {e}, using default template")
+            sys_prompt = PROMPTS["global_map_rag_points"].format(context_data=community_context)
         response = await use_model_func(
             query,
             system_prompt=sys_prompt,
