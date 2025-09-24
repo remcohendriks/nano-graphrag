@@ -44,7 +44,11 @@
 
 👌 Small yet [**portable**](#Components)(faiss, neo4j, ollama...), [**asynchronous**](#Async) and fully typed.
 
-✨ **New in v0.2.0+**: Support for custom entity types and typed relationships for domain-specific knowledge graphs!
+### Recent Technical Improvements
+
+- **NDJSON Entity Extraction**: Transitioned from CSV-like format to NDJSON for deterministic parsing and elimination of quote-handling ambiguities
+- **Sparse Embedding Preservation**: Resolved regression where sparse vectors were lost during community generation due to inconsistent content field formatting
+- **Hybrid Search Robustness**: Enhanced sparse+dense retrieval through consistent entity content representation across all pipeline stages
 
 
 
@@ -263,6 +267,80 @@ Below are the components you can use:
 - Check [examples/benchmarks](./examples/benchmarks) to see few comparisons between components.
 - **Always welcome to contribute more components.**
 
+## Hybrid Search (Sparse + Dense)
+
+`nano-graphrag` implements hybrid search combining dense embeddings (semantic) with sparse embeddings (lexical) for enhanced retrieval performance, particularly effective for identifier-based queries and technical terminology:
+
+### Architecture
+
+- **Sparse Embeddings**: SPLADE model generates lexical representations for term-based matching
+- **Dense Embeddings**: Standard semantic embeddings (OpenAI, Bedrock, etc.) for contextual similarity
+- **Fusion Strategy**: Reciprocal Rank Fusion (RRF) algorithm combines both retrieval channels
+- **GPU Acceleration**: Optional CUDA support for sparse embedding computation
+- **Memory Management**: LRU cache with configurable boundaries prevents unbounded memory growth
+
+### Installation
+
+```shell
+# Install with hybrid search dependencies
+pip install nano-graphrag[hybrid]
+
+# Or install with all features including Qdrant
+pip install nano-graphrag[all]
+```
+
+### Configuration
+
+```python
+from nano_graphrag import GraphRAG
+from nano_graphrag.config import GraphRAGConfig, HybridSearchConfig
+
+# Enable hybrid search
+config = GraphRAGConfig(
+    hybrid_search=HybridSearchConfig(
+        enabled=True,
+        sparse_model="prithvida/Splade_PP_en_v1",  # SPLADE model
+        device="cuda",  # or "cpu"
+        rrf_k=60,  # RRF fusion parameter
+        sparse_top_k_multiplier=2.0,  # Fetch 2x candidates for sparse
+        dense_top_k_multiplier=1.0,   # Fetch 1x candidates for dense
+        timeout_ms=5000,  # Timeout for sparse encoding
+        batch_size=32,  # Batch size for encoding
+        max_length=256  # Max token length for sparse model
+    )
+)
+
+rag = GraphRAG(config=config)
+```
+
+### Environment Variables
+
+```bash
+# Enable hybrid search
+ENABLE_HYBRID_SEARCH=true
+
+# GPU support (optional)
+HYBRID_DEVICE=cuda  # or cpu
+
+# Model configuration
+SPARSE_MODEL=prithvida/Splade_PP_en_v1
+RRF_K=60
+```
+
+### Requirements
+
+- **Qdrant**: Version 1.10.0+ for hybrid search support
+- **PyTorch**: Required for sparse embeddings (`pip install torch`)
+- **Transformers**: For SPLADE model (`pip install transformers`)
+
+### Performance Characteristics
+
+Hybrid search demonstrates superior performance for:
+- **Identifier-based queries**: Document IDs, reference numbers, case citations
+- **Acronym resolution**: Technical abbreviations and organizational identifiers
+- **Technical terminology**: Function names, error codes, API endpoints
+- **Mixed-mode queries**: Queries requiring both semantic understanding and exact term matching
+
 ## Advances
 
 
@@ -415,6 +493,17 @@ Some important prompts:
 - `PROMPTS["local_rag_response"]` is the system prompt template of the local search generation.
 - `PROMPTS["global_reduce_rag_response"]` is the system prompt template of the global search generation.
 - `PROMPTS["fail_response"]` is the fallback response when nothing is related to the user query.
+
+### Entity Extraction Format
+
+The entity extraction system utilizes NDJSON (Newline Delimited JSON) format for robust parsing and elimination of quote-handling ambiguities:
+
+```json
+{"type":"entity","name":"PERSON_NAME","entity_type":"PERSON","description":"Description of person"}
+{"type":"relationship","source":"PERSON_NAME","target":"ORG_NAME","description":"Relationship description","strength":8}
+```
+
+This format ensures consistent entity name preservation across storage layers and eliminates parsing ambiguities inherent in delimiter-based formats.
 
 </details>
 

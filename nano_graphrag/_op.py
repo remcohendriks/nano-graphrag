@@ -30,8 +30,6 @@ chunking_by_seperators = chunking_by_separators
 
 from ._extraction import (
     _handle_entity_relation_summary,
-    _handle_single_entity_extraction,
-    _handle_single_relationship_extraction,
     _merge_nodes_then_upsert,
     _merge_edges_then_upsert,
     extract_entities,

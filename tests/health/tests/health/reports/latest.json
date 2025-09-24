@@ -1,5 +1,145 @@
 [
   {
+    "timestamp": "2025-09-24T19:23:05.148090+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "insert": 648.7665388584137,
+      "global_query": 56.13263702392578,
+      "local_query": 23.468211889266968,
+      "reload": 11.021082878112793,
+      "total": 740.3850119113922
+    },
+    "counts": {
+      "nodes": 239,
+      "edges": 161,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "naive query failed: Naive RAG mode is disabled in config"
+    ],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "failed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-21T12:56:10.875411+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "insert": 532.9034869670868,
+      "global_query": 32.40523600578308,
+      "local_query": 26.20880103111267,
+      "reload": 27.300857067108154,
+      "total": 619.4548149108887
+    },
+    "counts": {
+      "nodes": 214,
+      "edges": 168,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "naive query failed: Naive RAG mode is disabled in config"
+    ],
+    "tests": {
+      "insert": "passed",
+      "global_query": "passed",
+      "local_query": "passed",
+      "naive_query": "failed",
+      "reload": "passed"
+    }
+  },
+  {
+    "timestamp": "2025-09-21T12:52:07.801790+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "local_query": 0.9374451637268066,
+      "total": 174.93956303596497
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: {code: Neo.ClientError.Security.Unauthorized} {message: The client is unauthorized due to authentication failure.}",
+      "global query failed: {code: Neo.ClientError.Security.AuthenticationRateLimit} {message: The client has provided incorrect authentication details too many times in a row.}",
+      "naive query failed: Naive RAG mode is disabled in config",
+      "Reload failed: {code: Neo.ClientError.Security.AuthenticationRateLimit} {message: The client has provided incorrect authentication details too many times in a row.}"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "failed",
+      "local_query": "failed",
+      "naive_query": "failed",
+      "reload": "failed"
+    }
+  },
+  {
+    "timestamp": "2025-09-21T12:48:06.591063+00:00",
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "storage": {
+      "vector_backend": "qdrant",
+      "graph_backend": "neo4j",
+      "kv_backend": "redis",
+      "qdrant_url": "http://localhost:6333"
+    },
+    "status": "failed",
+    "timings": {
+      "local_query": 2.1593639850616455,
+      "total": 144.9133870601654
+    },
+    "counts": {
+      "nodes": 0,
+      "edges": 0,
+      "communities": 0,
+      "chunks": 0
+    },
+    "errors": [
+      "Insert failed: {code: Neo.ClientError.Security.Unauthorized} {message: The client is unauthorized due to authentication failure.}",
+      "global query failed: {code: Neo.ClientError.Security.AuthenticationRateLimit} {message: The client has provided incorrect authentication details too many times in a row.}",
+      "naive query failed: Naive RAG mode is disabled in config",
+      "Reload failed: {code: Neo.ClientError.Security.AuthenticationRateLimit} {message: The client has provided incorrect authentication details too many times in a row.}"
+    ],
+    "tests": {
+      "insert": "failed",
+      "global_query": "failed",
+      "local_query": "failed",
+      "naive_query": "failed",
+      "reload": "failed"
+    }
+  },
+  {
     "timestamp": "2025-09-20T10:10:44.774145+00:00",
     "provider": "openai",
     "model": "gpt-5-mini",

@@ -159,13 +159,14 @@ async def extract_entities_dspy(
         logger.warning("Didn't extract any entities, maybe your LLM is not working")
         return None
     if entity_vdb is not None:
-        data_for_vdb = {
-            compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
-                "content": dp["entity_name"] + dp["description"],
-                "entity_name": dp["entity_name"],
+        data_for_vdb = {}
+        for dp in all_entities_data:
+            entity_name_clean = dp["entity_name"].strip('"').strip("'")
+            entity_id = compute_mdhash_id(entity_name_clean, prefix="ent-")
+            data_for_vdb[entity_id] = {
+                "content": f"{entity_name_clean} {dp['description']}",
+                "entity_name": entity_name_clean,
             }
-            for dp in all_entities_data
-        }
         await entity_vdb.upsert(data_for_vdb)
 
     return knwoledge_graph_inst

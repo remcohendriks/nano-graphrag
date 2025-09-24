@@ -14,14 +14,46 @@ from typing import Any, Union, Literal, Callable, Optional, Dict
 import numpy as np
 import tiktoken
 
-
-from transformers import AutoTokenizer
+# Lazy import to avoid loading transformers at module level
+AutoTokenizer = None
 
 logger = logging.getLogger("nano-graphrag")
 logging.getLogger("neo4j").setLevel(logging.ERROR)
 
 # Track which functions have already shown deprecation warnings
 _deprecation_warnings_shown = set()
+
+
+def safe_float(value, default=1.0):
+    """Convert value to float safely, returning default on failure.
+
+    Args:
+        value: Value to convert to float
+        default: Default value if conversion fails
+
+    Returns:
+        Float value or default
+    """
+    try:
+        return float(value) if value is not None else default
+    except (ValueError, TypeError):
+        return default
+
+
+def sanitize_str(text):
+    """Sanitize string for storage by unescaping HTML and removing control characters.
+
+    Args:
+        text: String to sanitize
+
+    Returns:
+        Sanitized string, empty string if input is falsy
+    """
+    if not text:
+        return ""
+    text = html.unescape(text)
+    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
+    return text.strip()
 
 def deprecated_llm_function(replacement: str, removal_version: str = "0.2.0") -> Callable:
     """Decorator to mark LLM functions as deprecated.
@@ -179,8 +211,12 @@ class TokenizerWrapper:
         if self.tokenizer_type == "tiktoken":
             self._tokenizer = tiktoken.encoding_for_model(self.model_name)
         elif self.tokenizer_type == "huggingface":
+            global AutoTokenizer
             if AutoTokenizer is None:
-                raise ImportError("`transformers` is not installed. Please install it via `pip install transformers` to use HuggingFace tokenizers.")
+                try:
+                    from transformers import AutoTokenizer
+                except ImportError:
+                    raise ImportError("`transformers` is not installed. Please install it via `pip install transformers` to use HuggingFace tokenizers.")
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=True)
         else:
             raise ValueError(f"Unknown tokenizer_type: {self.tokenizer_type}")

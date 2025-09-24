@@ -79,13 +79,6 @@ async def _find_most_related_text_unit_from_entities(
     tokenizer_wrapper: TokenizerWrapper,
 ) -> List[TextChunkSchema]:
 
-    # Debug: Log entities being processed
-    logger.info(f"[DEBUG] Finding text units from {len(node_datas)} entities")
-    for entity in node_datas[:5]:  # Log first 5 entities
-        entity_name = entity.get('entity_name', 'unknown')
-        source_id = entity.get('source_id', 'none')
-        entity_type = entity.get('entity_type', 'unknown')
-        logger.info(f"[DEBUG] Entity: {entity_name} (type={entity_type}) -> source_id: {source_id}")
 
     text_units = [
         split_string_by_multi_markers(dp["source_id"], [GRAPH_FIELD_SEP])
@@ -117,12 +110,8 @@ async def _find_most_related_text_unit_from_entities(
                     and c_id in all_one_hop_text_units_lookup[e[1]]
                 ):
                     relation_counts += 1
-            # Fetch chunk from Redis
+            # Fetch chunk
             chunk_data = await text_chunks_db.get_by_id(c_id)
-            if chunk_data:
-                logger.info(f"[DEBUG] Retrieved chunk {c_id}: {len(chunk_data.get('content', ''))} chars")
-            else:
-                logger.warning(f"[DEBUG] Failed to retrieve chunk {c_id} from Redis")
 
             all_text_units_lookup[c_id] = {
                 "data": chunk_data,
@@ -147,16 +136,6 @@ async def _find_most_related_text_unit_from_entities(
     )
     all_text_units: list[TextChunkSchema] = [t["data"] for t in all_text_units]
 
-    # Debug logging for text units
-    if all_text_units:
-        logger.info(f"[DEBUG] Selected {len(all_text_units)} text units for local query")
-        for idx, unit in enumerate(all_text_units[:3]):  # Log first 3 units
-            content = unit.get("content", "") if unit else ""
-            preview = content[:1000]
-            chunk_id = unit.get("id", "unknown") if unit else "unknown"
-            logger.info(f"[DEBUG] Text unit {idx}: ID={chunk_id}, Length={len(content)} chars, Preview: {preview}...")
-    else:
-        logger.info("[DEBUG] No text units selected for local query")
 
     return all_text_units
 
@@ -217,6 +196,23 @@ async def _build_local_query_context(
     results = await entities_vdb.query(query, top_k=query_param.top_k)
     if not len(results):
         return None
+    # Log ranked entities (top 20) as returned by vector search
+    try:
+        max_display = min(20, len(results))
+        # Basic score stats
+        scores = [r.get("score") for r in results if isinstance(r.get("score"), (int, float))]
+        if scores:
+            logger.info(
+                f"[RANK] Entities returned: {len(results)} | score min={min(scores):.3f} "
+                f"max={max(scores):.3f} mean={sum(scores)/len(scores):.3f}"
+            )
+        for i, r in enumerate(results[:max_display]):
+            name = r.get("entity_name") or r.get("id") or "unknown"
+            score = r.get("score", 0.0)
+            rid = r.get("id", "")
+            logger.info(f"[RANK] {i+1:02d}. {name} (score={score:.3f}) id={rid}")
+    except Exception as e:
+        logger.debug(f"[RANK] Failed to log ranked entities: {e}")
     node_datas = await knowledge_graph_inst.get_nodes_batch([r["entity_name"] for r in results])
     if not all([n is not None for n in node_datas]):
         logger.warning("Some nodes are missing, maybe the storage is damaged")

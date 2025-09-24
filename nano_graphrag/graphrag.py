@@ -317,15 +317,16 @@ class GraphRAG:
 
             data_for_vdb = {}
             for dp in all_entities_data:
-                entity_id = compute_mdhash_id(dp["entity_name"], prefix="ent-")
+                entity_name_clean = dp["entity_name"].strip('"').strip("'")
+                entity_id = compute_mdhash_id(entity_name_clean, prefix="ent-")
                 if enable_type_prefix and "entity_type" in dp:
-                    content = dp["entity_name"] + f"[{dp['entity_type']}] " + dp["description"]
+                    content = f"{entity_name_clean} [{dp['entity_type']}] {dp['description']}"
                 else:
-                    content = dp["entity_name"] + dp["description"]
+                    content = f"{entity_name_clean} {dp['description']}"
 
                 data_for_vdb[entity_id] = {
                     "content": content,
-                    "entity_name": dp["entity_name"],
+                    "entity_name": entity_name_clean,
                 }
 
             await entity_vdb.upsert(data_for_vdb)
@@ -475,38 +476,82 @@ class GraphRAG:
             # Get all unique node IDs from community schema
             schema = await self.chunk_entity_relation_graph.community_schema()
             all_node_ids = sorted({node_id for comm in schema.values() for node_id in comm.get("nodes", [])})
-            
-            # Batch fetch node data
-            entity_dict = {}
-            for node_id in all_node_ids:
-                # Get individual node data (batch method may not exist)
-                try:
-                    node_data = await self.chunk_entity_relation_graph.get_node(node_id)
-                    if node_data:
-                        # Get description and ensure it's not empty for embedding
-                        description = node_data.get("description", "").strip()
+
+            use_payload_update = (
+                hasattr(self.entities_vdb, 'update_payload') and
+                (self.config.storage.hybrid_search.enabled
+                 if hasattr(self.config.storage, 'hybrid_search')
+                 else self.global_config.get("enable_hybrid_search", False))
+            )
+
+            if use_payload_update:
+                # Payload-only update to preserve embeddings
+                from nano_graphrag._utils import compute_mdhash_id
+                updates = {}
+                for node_id in all_node_ids:
+                    try:
+                        node_data = await self.chunk_entity_relation_graph.get_node(node_id)
+                        if not node_data:
+                            continue
+                        description = (node_data.get("description", "") or "").strip()
                         if not description:
-                            # Use entity name and type as fallback content
-                            entity_name = node_data.get("name", node_id).strip() if node_data.get("name") else node_id
+                            entity_name = (node_data.get("name") or node_id).strip()
                             entity_type = node_data.get("entity_type", "UNKNOWN")
                             description = f"{entity_name} ({entity_type})"
-                        
-                        # Final check to ensure description is not empty
-                        if description and description != " (UNKNOWN)":
-                            entity_dict[node_id] = {
-                                "content": description,
-                                "entity_name": node_data.get("name", node_id),
-                                "entity_type": node_data.get("entity_type", "UNKNOWN"),
-                            }
-                        else:
-                            logger.debug(f"Skipping entity {node_id} with empty description")
-                except Exception as e:
-                    # Node might not exist, skip it
-                    logger.debug(f"Could not get node {node_id}: {e}")
-                    continue
-            
-            if entity_dict:
-                await self.entities_vdb.upsert(entity_dict)
+
+                        entity_name = node_data.get("name", node_id)
+                        entity_name_clean = entity_name.strip('"').strip("'")
+                        entity_key = compute_mdhash_id(entity_name_clean, prefix='ent-')
+                        updates[entity_key] = {
+                            "entity_name": entity_name_clean,
+                            "entity_type": node_data.get("entity_type", "UNKNOWN"),
+                            "community_description": description,
+                        }
+                    except Exception as e:
+                        logger.debug(f"Could not update {node_id}: {e}")
+
+                if updates:
+                    logger.info(f"[COMMUNITY] Updating {len(updates)} entity payloads (preserving vectors)")
+                    await self.entities_vdb.update_payload(updates)
+            else:
+                # Fallback: full re-embedding path (recreates vectors, used when hybrid disabled)
+                from nano_graphrag._utils import compute_mdhash_id
+                entity_dict = {}
+                for node_id in all_node_ids:
+                    # Get individual node data (batch method may not exist)
+                    try:
+                        node_data = await self.chunk_entity_relation_graph.get_node(node_id)
+                        if node_data:
+                            # Get description and ensure it's not empty for embedding
+                            description = node_data.get("description", "").strip()
+                            if not description:
+                                # Use entity name and type as fallback content
+                                entity_name = node_data.get("name", node_id).strip() if node_data.get("name") else node_id
+                                entity_type = node_data.get("entity_type", "UNKNOWN")
+                                description = f"{entity_name} ({entity_type})"
+
+                            # Final check to ensure description is not empty
+                            if description and description != " (UNKNOWN)":
+                                entity_name = node_data.get("name", node_id)
+                                entity_name_clean = entity_name.strip('"').strip("'")
+                                entity_key = compute_mdhash_id(entity_name_clean, prefix='ent-')
+                                entity_dict[entity_key] = {
+                                    "content": f"{entity_name_clean} {description}",
+                                    "entity_name": entity_name_clean,
+                                    "entity_type": node_data.get("entity_type", "UNKNOWN"),
+                                }
+                            else:
+                                logger.debug(f"Skipping entity {node_id} with empty description")
+                    except Exception as e:
+                        # Node might not exist, skip it
+                        logger.debug(f"Could not get node {node_id}: {e}")
+                        continue
+
+                if entity_dict:
+                    # Generate embeddings for the updated entity descriptions
+                    # This ensures both dense and sparse embeddings are created
+                    logger.info(f"[COMMUNITY] Updating {len(entity_dict)} entities with new embeddings")
+                    await self.entities_vdb.upsert(entity_dict)
     
     def _global_config(self) -> dict:
         """Build global config with all required fields including function references."""

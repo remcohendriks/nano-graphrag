@@ -83,6 +83,38 @@ class Node2VecConfig:
 
 
 @dataclass(frozen=True)
+class HybridSearchConfig:
+    """Hybrid search configuration for sparse+dense retrieval.
+
+    When using external SPLADE service, only enabled and RRF parameters are used.
+    The service handles its own batching and timeouts.
+    """
+    enabled: bool = False
+    rrf_k: int = 60  # RRF fusion parameter (Note: Qdrant currently uses fixed k=60)
+    sparse_top_k_multiplier: float = 2.0  # Fetch 2x candidates for sparse
+    dense_top_k_multiplier: float = 1.0   # Fetch 1x candidates for dense
+
+    @classmethod
+    def from_env(cls) -> 'HybridSearchConfig':
+        """Create config from environment variables."""
+        return cls(
+            enabled=os.getenv("ENABLE_HYBRID_SEARCH", "false").lower() == "true",
+            rrf_k=int(os.getenv("RRF_K", "60")),
+            sparse_top_k_multiplier=float(os.getenv("SPARSE_TOP_K_MULTIPLIER", "2.0")),
+            dense_top_k_multiplier=float(os.getenv("DENSE_TOP_K_MULTIPLIER", "1.0"))
+        )
+
+    def __post_init__(self):
+        """Validate configuration."""
+        if self.rrf_k <= 0:
+            raise ValueError(f"rrf_k must be positive, got {self.rrf_k}")
+        if self.sparse_top_k_multiplier <= 0:
+            raise ValueError(f"sparse_top_k_multiplier must be positive, got {self.sparse_top_k_multiplier}")
+        if self.dense_top_k_multiplier <= 0:
+            raise ValueError(f"dense_top_k_multiplier must be positive, got {self.dense_top_k_multiplier}")
+
+
+@dataclass(frozen=True)
 class StorageConfig:
     """Storage backend configuration."""
     vector_backend: str = "nano"  # nano, hnswlib, milvus, qdrant
@@ -124,7 +156,10 @@ class StorageConfig:
 
     # Node2Vec configuration (for NetworkX backend)
     node2vec: Node2VecConfig = field(default_factory=lambda: Node2VecConfig(enabled=True))
-    
+
+    # Hybrid search configuration
+    hybrid_search: HybridSearchConfig = field(default_factory=lambda: HybridSearchConfig())
+
     @classmethod
     def from_env(cls) -> 'StorageConfig':
         """Create config from environment variables."""
@@ -170,7 +205,8 @@ class StorageConfig:
             redis_max_connections=int(os.getenv("REDIS_MAX_CONNECTIONS", "50")),
             redis_connection_timeout=float(os.getenv("REDIS_CONNECTION_TIMEOUT", "5.0")),
             redis_socket_timeout=float(os.getenv("REDIS_SOCKET_TIMEOUT", "5.0")),
-            redis_health_check_interval=int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30"))
+            redis_health_check_interval=int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30")),
+            hybrid_search=HybridSearchConfig.from_env()
         )
     
     def __post_init__(self):
@@ -461,8 +497,9 @@ class GraphRAGConfig:
             },
             'always_create_working_dir': True,
             'addon_params': {},
+            'hybrid_search': self.storage.hybrid_search,
         }
-        
+
         # Add HNSW-specific parameters if using hnswlib backend
         if self.storage.vector_backend == "hnswlib":
             config_dict['vector_db_storage_cls_kwargs'] = {

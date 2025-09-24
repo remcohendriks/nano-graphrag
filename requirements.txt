@@ -12,6 +12,11 @@ neo4j
 aioboto3
 redis[hiredis]>=5.0.0
 
+# Optional: Hybrid search dependencies
+# Install with: pip install nano-graphrag[hybrid]
+# transformers>=4.36.0
+# torch>=2.0.0
+
 # Optional: FastAPI dependencies
 # fastapi>=0.115.0
 # uvicorn[standard]>=0.30.0

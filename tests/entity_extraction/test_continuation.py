@@ -19,14 +19,16 @@ async def test_continuation_when_truncated():
         call_count += 1
 
         if "Continue extracting" in prompt:
-            # Continuation call - return relationships and completion
-            return """("relationship"<|>"ALICE"<|>"BOB"<|>"Alice works with Bob"<|>8)##
-("relationship"<|>"BOB"<|>"CHARLIE"<|>"Bob manages Charlie"<|>7)<|COMPLETE|>"""
+            # Continuation call - return relationships and completion in NDJSON format
+            return """{"type":"relationship","source":"ALICE","target":"BOB","description":"Alice works with Bob","strength":8}
+{"type":"relationship","source":"BOB","target":"CHARLIE","description":"Bob manages Charlie","strength":7}
+<|COMPLETE|>"""
         else:
-            # Initial call - return entities but truncated (no completion delimiter)
-            return """("entity"<|>"ALICE"<|>"PERSON"<|>"Alice is a software engineer")##
-("entity"<|>"BOB"<|>"PERSON"<|>"Bob is a manager")##
-("entity"<|>"CHARLIE"<|>"PERSON"<|>"Charlie is a developer")..."""
+            # Initial call - return entities in NDJSON but truncated (no completion delimiter)
+            return """{"type":"entity","name":"ALICE","entity_type":"PERSON","description":"Alice is a software engineer"}
+{"type":"entity","name":"BOB","entity_type":"PERSON","description":"Bob is a manager"}
+{"type":"entity","name":"CHARLIE","entity_type":"PERSON","description":"Charlie is a developer"}
+..."""
 
     config = ExtractorConfig(
         max_gleaning=0,
@@ -63,10 +65,11 @@ async def test_no_continuation_when_complete():
         nonlocal call_count
         call_count += 1
 
-        # Return complete extraction with delimiter
-        return """("entity"<|>"ALICE"<|>"PERSON"<|>"Alice is a software engineer")##
-("entity"<|>"BOB"<|>"PERSON"<|>"Bob is a manager")##
-("relationship"<|>"ALICE"<|>"BOB"<|>"Alice works with Bob"<|>8)<|COMPLETE|>"""
+        # Return complete extraction with delimiter in NDJSON format
+        return """{"type":"entity","name":"ALICE","entity_type":"PERSON","description":"Alice is a software engineer"}
+{"type":"entity","name":"BOB","entity_type":"PERSON","description":"Bob is a manager"}
+{"type":"relationship","source":"ALICE","target":"BOB","description":"Alice works with Bob","strength":8}
+<|COMPLETE|>"""
 
     config = ExtractorConfig(
         max_gleaning=0,
@@ -94,8 +97,8 @@ async def test_max_continuation_attempts():
         nonlocal call_count
         call_count += 1
 
-        # Never return completion delimiter
-        return f"""("entity"<|>"ENTITY_{call_count}"<|>"PERSON"<|>"Description {call_count}")##..."""
+        # Never return completion delimiter - use NDJSON format with ellipsis on new line
+        return f'{{"type":"entity","name":"ENTITY_{call_count}","entity_type":"PERSON","description":"Description {call_count}"}}\n...'
 
     config = ExtractorConfig(
         max_gleaning=0,
@@ -122,19 +125,21 @@ async def test_continuation_with_gleaning():
         call_history.append(prompt[:50] if len(prompt) > 50 else prompt)
 
         if "Continue extracting" in prompt:
-            return """("relationship"<|>"ALICE"<|>"BOB"<|>"Alice works with Bob"<|>8)##
-("relationship"<|>"BOB"<|>"CHARLIE"<|>"Bob manages Charlie"<|>7)<|COMPLETE|>"""
+            return """{"type":"relationship","source":"ALICE","target":"BOB","description":"Alice works with Bob","strength":8}
+{"type":"relationship","source":"BOB","target":"CHARLIE","description":"Bob manages Charlie","strength":7}
+<|COMPLETE|>"""
         elif "MANY entities were missed" in prompt:
-            # Gleaning call
-            return """("entity"<|>"DAVID"<|>"PERSON"<|>"David is a designer")##"""
+            # Gleaning call - NDJSON format
+            return """{"type":"entity","name":"DAVID","entity_type":"PERSON","description":"David is a designer"}"""
         elif "Answer YES | NO" in prompt:
             # Check if more gleaning needed
             return "NO"
         else:
-            # Initial call - truncated
-            return """("entity"<|>"ALICE"<|>"PERSON"<|>"Alice is a software engineer")##
-("entity"<|>"BOB"<|>"PERSON"<|>"Bob is a manager")##
-("entity"<|>"CHARLIE"<|>"PERSON"<|>"Charlie is an intern")..."""
+            # Initial call - truncated NDJSON format
+            return """{"type":"entity","name":"ALICE","entity_type":"PERSON","description":"Alice is a software engineer"}
+{"type":"entity","name":"BOB","entity_type":"PERSON","description":"Bob is a manager"}
+{"type":"entity","name":"CHARLIE","entity_type":"PERSON","description":"Charlie is an intern"}
+..."""
 
     config = ExtractorConfig(
         max_gleaning=1,
