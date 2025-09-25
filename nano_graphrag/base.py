@@ -1,9 +1,12 @@
 from dataclasses import dataclass, field
-from typing import TypedDict, Union, Literal, Generic, TypeVar, List
+from typing import TypedDict, Union, Literal, Generic, TypeVar, List, TYPE_CHECKING, Any
 
 import numpy as np
 
 from ._utils import EmbeddingFunc
+
+if TYPE_CHECKING:
+    from ._extraction import DocumentGraphBatch
 
 
 @dataclass
@@ -177,6 +180,10 @@ class BaseGraphStorage(StorageNameSpace):
     async def upsert_edges_batch(
         self, edges_data: list[tuple[str, str, dict[str, str]]]
     ):
+        raise NotImplementedError
+
+    async def execute_document_batch(self, batch: Any) -> None:
+        """Execute a batch of document graph operations in a single transaction."""
         raise NotImplementedError
 
     async def clustering(self, algorithm: str):

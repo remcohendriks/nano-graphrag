@@ -3,12 +3,13 @@ import asyncio
 import re
 import time
 from collections import defaultdict
-from typing import List, TYPE_CHECKING, Optional, Any, Union
+from typing import List, TYPE_CHECKING, Optional, Any, Union, Dict, Tuple
 from dataclasses import dataclass, field
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 if TYPE_CHECKING:
     from neo4j import AsyncGraphDatabase
+    from .._extraction import DocumentGraphBatch
 from ..base import BaseGraphStorage, SingleCommunitySchema
 from .._utils import logger
 from ..prompt import GRAPH_FIELD_SEP
@@ -541,9 +542,137 @@ class Neo4jStorage(BaseGraphStorage):
                 """,
                 edges=edges_params
             )
-        
 
+    def _prepare_batch_nodes(self, nodes: List[Tuple[str, Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+        """Prepare nodes for batch insertion, grouped by entity type."""
+        nodes_by_type = defaultdict(list)
+        for node_id, node_data in nodes:
+            entity_type = node_data.get("entity_type", "UNKNOWN").strip('"')
+            entity_type = self._sanitize_label(entity_type)
+            nodes_by_type[entity_type].append({
+                "id": node_id,
+                "data": node_data
+            })
+        return nodes_by_type
 
+    def _prepare_batch_edges(self, edges: List[Tuple[str, str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Prepare edges for batch insertion."""
+        edges_params = []
+        for src_id, tgt_id, edge_data in edges:
+            relation_type = self._sanitize_label(edge_data.get("relation_type", "RELATED"))
+            edges_params.append({
+                "source_id": src_id,
+                "target_id": tgt_id,
+                "relation_type": relation_type,
+                "weight": float(edge_data.get("weight", 0.0)),
+                "description": edge_data.get("description", ""),
+                "source_id_field": edge_data.get("source_id", ""),
+                "order": edge_data.get("order", 1)
+            })
+        return edges_params
+
+    async def _execute_batch_nodes(self, tx: Any, nodes_by_type: Dict[str, List[Dict[str, Any]]]) -> None:
+        """Execute batch node insertion with APOC merge."""
+        for entity_type, typed_nodes in nodes_by_type.items():
+            await tx.run(
+                f"""
+                UNWIND $nodes AS node
+                MERGE (n:`{self.namespace}`:`{entity_type}` {{id: node.id}})
+                SET n.entity_type = '{entity_type}',
+                    n.description = CASE
+                        WHEN n.description IS NULL THEN node.data.description
+                        ELSE apoc.text.join([n.description, node.data.description], '{GRAPH_FIELD_SEP}')
+                    END,
+                    n.source_id = apoc.coll.toSet(
+                        apoc.coll.flatten([
+                            CASE WHEN n.source_id IS NULL THEN [] ELSE split(n.source_id, '{GRAPH_FIELD_SEP}') END,
+                            split(node.data.source_id, '{GRAPH_FIELD_SEP}')
+                        ])
+                    )[0]
+                """,
+                nodes=typed_nodes
+            )
+
+    async def _execute_batch_edges(self, tx: Any, edges_params: List[Dict[str, Any]]) -> None:
+        """Execute batch edge insertion with APOC merge."""
+        await tx.run(
+            f"""
+            UNWIND $edges AS edge
+            MATCH (s:`{self.namespace}`)
+            WHERE s.id = edge.source_id
+            WITH edge, s
+            MATCH (t:`{self.namespace}`)
+            WHERE t.id = edge.target_id
+            MERGE (s)-[r:RELATED]->(t)
+            SET r.relation_type = edge.relation_type,
+                r.weight = COALESCE(r.weight, 0) + edge.weight,
+                r.description = CASE
+                    WHEN r.description IS NULL THEN edge.description
+                    ELSE apoc.text.join(
+                        apoc.coll.toSet(
+                            apoc.coll.flatten([
+                                split(r.description, '{GRAPH_FIELD_SEP}'),
+                                split(edge.description, '{GRAPH_FIELD_SEP}')
+                            ])
+                        ),
+                        '{GRAPH_FIELD_SEP}'
+                    )
+                END,
+                r.source_id = apoc.text.join(
+                    apoc.coll.toSet(
+                        apoc.coll.flatten([
+                            CASE WHEN r.source_id IS NULL THEN [] ELSE split(r.source_id, '{GRAPH_FIELD_SEP}') END,
+                            split(edge.source_id_field, '{GRAPH_FIELD_SEP}')
+                        ])
+                    ),
+                    '{GRAPH_FIELD_SEP}'
+                ),
+                r.order = CASE
+                    WHEN r.order IS NULL THEN edge.order
+                    ELSE apoc.math.minLong(r.order, edge.order)
+                END
+            """,
+            edges=edges_params
+        )
+
+    async def _process_batch_chunk(self, chunk: 'DocumentGraphBatch', chunk_idx: int) -> None:
+        """Process a single chunk of batch operations in a transaction."""
+        if not chunk.nodes and not chunk.edges:
+            return
+
+        async with self.async_driver.session(database=self.neo4j_database) as session:
+            async with session.begin_transaction() as tx:
+                try:
+                    if chunk.nodes:
+                        nodes_by_type = self._prepare_batch_nodes(chunk.nodes)
+                        await self._execute_batch_nodes(tx, nodes_by_type)
+
+                    if chunk.edges:
+                        edges_params = self._prepare_batch_edges(chunk.edges)
+                        await self._execute_batch_edges(tx, edges_params)
+
+                    await tx.commit()
+                except Exception as e:
+                    await tx.rollback()
+                    logger.error(f"Batch transaction failed for chunk {chunk_idx}: {e}")
+                    raise
+
+    async def execute_document_batch(self, batch: 'DocumentGraphBatch') -> None:
+        """Execute a batch of document operations in a single transaction with retry logic."""
+        from neo4j.exceptions import TransientError
+
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type(TransientError),
+            reraise=True
+        )
+        async def _execute_with_retry():
+            chunks = batch.chunk(max_size=10)
+            for chunk_idx, chunk in enumerate(chunks):
+                await self._process_batch_chunk(chunk, chunk_idx)
+
+        await _execute_with_retry()
 
     async def clustering(self, algorithm: str):
         if algorithm != "leiden":
