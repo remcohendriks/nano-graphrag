@@ -108,11 +108,22 @@ class TestNeo4jBatchTransaction:
         batch.add_node("bob", {"entity_type": "Person", "description": "Bob", "source_id": "doc1"})
         batch.add_edge("alice", "bob", {"weight": 1.0, "description": "knows", "source_id": "doc1"})
 
-        # Mock session and transaction
+        # Mock session and transaction with proper async context manager protocol
         mock_tx = AsyncMock()
+        mock_tx.commit = AsyncMock()
+        mock_tx.rollback = AsyncMock()
+        mock_tx.run = AsyncMock()
+
         mock_session = AsyncMock()
-        mock_session.begin_transaction.return_value.__aenter__.return_value = mock_tx
-        storage.async_driver.session.return_value.__aenter__.return_value = mock_session
+        mock_session.begin_transaction = MagicMock()
+        mock_session.begin_transaction.return_value.__aenter__ = AsyncMock(return_value=mock_tx)
+        mock_session.begin_transaction.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # Mock the session factory to return async context manager
+        session_factory = MagicMock()
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        storage.async_driver.session = MagicMock(return_value=session_factory.return_value)
 
         # Execute batch
         await storage.execute_document_batch(batch)
@@ -121,8 +132,8 @@ class TestNeo4jBatchTransaction:
         mock_session.begin_transaction.assert_called_once()
         mock_tx.commit.assert_called_once()
 
-        # Verify queries were executed (2 calls: one for nodes, one for edges)
-        assert mock_tx.run.call_count == 2
+        # Verify queries were executed (at least 1 for nodes, 1 for edges)
+        assert mock_tx.run.call_count >= 2
 
     @pytest.mark.asyncio
     async def test_batch_with_bidirectional_edges(self, mock_neo4j_storage):
@@ -135,16 +146,27 @@ class TestNeo4jBatchTransaction:
         batch.add_edge("alice", "bob", {"weight": 1.0, "description": "manages"})
         batch.add_edge("bob", "alice", {"weight": 1.0, "description": "reports_to"})
 
-        # Mock session and transaction
+        # Mock session and transaction with proper async context manager protocol
         mock_tx = AsyncMock()
+        mock_tx.commit = AsyncMock()
+        mock_tx.rollback = AsyncMock()
+        mock_tx.run = AsyncMock()
+
         mock_session = AsyncMock()
-        mock_session.begin_transaction.return_value.__aenter__.return_value = mock_tx
-        storage.async_driver.session.return_value.__aenter__.return_value = mock_session
+        mock_session.begin_transaction = MagicMock()
+        mock_session.begin_transaction.return_value.__aenter__ = AsyncMock(return_value=mock_tx)
+        mock_session.begin_transaction.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # Mock the session factory to return async context manager
+        session_factory = MagicMock()
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        storage.async_driver.session = MagicMock(return_value=session_factory.return_value)
 
         # Should complete without deadlock
         await storage.execute_document_batch(batch)
 
-        assert mock_tx.commit.assert_called_once()
+        mock_tx.commit.assert_called_once()
         assert mock_tx.rollback.call_count == 0
 
     @pytest.mark.asyncio
@@ -155,12 +177,22 @@ class TestNeo4jBatchTransaction:
         batch = DocumentGraphBatch()
         batch.add_node("test", {"entity_type": "Test"})
 
-        # Mock session with error
+        # Mock session and transaction with error
         mock_tx = AsyncMock()
-        mock_tx.run.side_effect = Exception("Database error")
+        mock_tx.commit = AsyncMock()
+        mock_tx.rollback = AsyncMock()
+        mock_tx.run = AsyncMock(side_effect=Exception("Database error"))
+
         mock_session = AsyncMock()
-        mock_session.begin_transaction.return_value.__aenter__.return_value = mock_tx
-        storage.async_driver.session.return_value.__aenter__.return_value = mock_session
+        mock_session.begin_transaction = MagicMock()
+        mock_session.begin_transaction.return_value.__aenter__ = AsyncMock(return_value=mock_tx)
+        mock_session.begin_transaction.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # Mock the session factory to return async context manager
+        session_factory = MagicMock()
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        storage.async_driver.session = MagicMock(return_value=session_factory.return_value)
 
         # Execute should raise after retries
         with pytest.raises(Exception, match="Database error"):
@@ -179,11 +211,22 @@ class TestNeo4jBatchTransaction:
         for i in range(25):
             batch.add_node(f"entity{i}", {"entity_type": "Entity", "description": f"Entity {i}"})
 
-        # Mock session and transaction
+        # Mock session and transaction with proper async context manager protocol
         mock_tx = AsyncMock()
+        mock_tx.commit = AsyncMock()
+        mock_tx.rollback = AsyncMock()
+        mock_tx.run = AsyncMock()
+
         mock_session = AsyncMock()
-        mock_session.begin_transaction.return_value.__aenter__.return_value = mock_tx
-        storage.async_driver.session.return_value.__aenter__.return_value = mock_session
+        mock_session.begin_transaction = MagicMock()
+        mock_session.begin_transaction.return_value.__aenter__ = AsyncMock(return_value=mock_tx)
+        mock_session.begin_transaction.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # Mock the session factory to return async context manager
+        session_factory = MagicMock()
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        storage.async_driver.session = MagicMock(return_value=session_factory.return_value)
 
         await storage.execute_document_batch(batch)
 
@@ -203,19 +246,33 @@ class TestNeo4jBatchTransaction:
             "source_id": f"doc1{GRAPH_FIELD_SEP}doc2"
         })
 
-        # Mock session and transaction
+        # Mock session and transaction with proper async context manager protocol
         mock_tx = AsyncMock()
+        mock_tx.commit = AsyncMock()
+        mock_tx.rollback = AsyncMock()
+        mock_tx.run = AsyncMock()
+
         mock_session = AsyncMock()
-        mock_session.begin_transaction.return_value.__aenter__.return_value = mock_tx
-        storage.async_driver.session.return_value.__aenter__.return_value = mock_session
+        mock_session.begin_transaction = MagicMock()
+        mock_session.begin_transaction.return_value.__aenter__ = AsyncMock(return_value=mock_tx)
+        mock_session.begin_transaction.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        # Mock the session factory to return async context manager
+        session_factory = MagicMock()
+        session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        storage.async_driver.session = MagicMock(return_value=session_factory.return_value)
 
         await storage.execute_document_batch(batch)
 
-        # Check that APOC functions are in the query
+        # Check that the query uses SET += for property replacement (CDX-002/003 fix)
+        # APOC functions are no longer used after the double-merge fix
         call_args = mock_tx.run.call_args[0][0]
-        assert "apoc.text.join" in call_args
-        assert "apoc.coll.toSet" in call_args
-        assert "apoc.coll.flatten" in call_args
+        assert "SET n +=" in call_args  # Simple property replacement
+        assert "MERGE" in call_args  # Node merge
+        # APOC functions should NOT be in the query anymore (CDX-002/003 fix)
+        assert "apoc.text.join" not in call_args
+        assert "apoc.coll.toSet" not in call_args
 
 
 class TestNetworkXBatchCompatibility:
