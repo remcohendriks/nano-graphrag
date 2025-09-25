@@ -27,12 +27,13 @@ def mock_neo4j_storage():
     }
 
     with patch('nano_graphrag._storage.gdb_neo4j.Neo4jStorage.__post_init__'):
-        storage = Neo4jStorage()
-        storage.global_config = global_config
+        storage = Neo4jStorage(
+            namespace="test",
+            global_config=global_config
+        )
         storage.neo4j_url = "neo4j://localhost"
         storage.neo4j_auth = ("neo4j", "password")
         storage.neo4j_database = "neo4j"
-        storage.namespace = "test"
 
         # Mock the driver
         storage.async_driver = AsyncMock()

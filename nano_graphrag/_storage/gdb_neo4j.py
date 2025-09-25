@@ -564,37 +564,24 @@ class Neo4jStorage(BaseGraphStorage):
                 "source_id": src_id,
                 "target_id": tgt_id,
                 "relation_type": relation_type,
-                "weight": float(edge_data.get("weight", 0.0)),
-                "description": edge_data.get("description", ""),
-                "source_id_field": edge_data.get("source_id", ""),
-                "order": edge_data.get("order", 1)
+                "edge_data": edge_data  # Pass the complete edge_data dict
             })
         return edges_params
 
     async def _execute_batch_nodes(self, tx: Any, nodes_by_type: Dict[str, List[Dict[str, Any]]]) -> None:
-        """Execute batch node insertion with APOC merge."""
+        """Execute batch node insertion, replacing properties with pre-merged data."""
         for entity_type, typed_nodes in nodes_by_type.items():
             await tx.run(
                 f"""
                 UNWIND $nodes AS node
                 MERGE (n:`{self.namespace}`:`{entity_type}` {{id: node.id}})
-                SET n.entity_type = '{entity_type}',
-                    n.description = CASE
-                        WHEN n.description IS NULL THEN node.data.description
-                        ELSE apoc.text.join([n.description, node.data.description], '{GRAPH_FIELD_SEP}')
-                    END,
-                    n.source_id = apoc.coll.toSet(
-                        apoc.coll.flatten([
-                            CASE WHEN n.source_id IS NULL THEN [] ELSE split(n.source_id, '{GRAPH_FIELD_SEP}') END,
-                            split(node.data.source_id, '{GRAPH_FIELD_SEP}')
-                        ])
-                    )[0]
+                SET n += node.data
                 """,
                 nodes=typed_nodes
             )
 
     async def _execute_batch_edges(self, tx: Any, edges_params: List[Dict[str, Any]]) -> None:
-        """Execute batch edge insertion with APOC merge."""
+        """Execute batch edge insertion, replacing properties with pre-merged data."""
         await tx.run(
             f"""
             UNWIND $edges AS edge
@@ -604,33 +591,8 @@ class Neo4jStorage(BaseGraphStorage):
             MATCH (t:`{self.namespace}`)
             WHERE t.id = edge.target_id
             MERGE (s)-[r:RELATED]->(t)
-            SET r.relation_type = edge.relation_type,
-                r.weight = COALESCE(r.weight, 0) + edge.weight,
-                r.description = CASE
-                    WHEN r.description IS NULL THEN edge.description
-                    ELSE apoc.text.join(
-                        apoc.coll.toSet(
-                            apoc.coll.flatten([
-                                split(r.description, '{GRAPH_FIELD_SEP}'),
-                                split(edge.description, '{GRAPH_FIELD_SEP}')
-                            ])
-                        ),
-                        '{GRAPH_FIELD_SEP}'
-                    )
-                END,
-                r.source_id = apoc.text.join(
-                    apoc.coll.toSet(
-                        apoc.coll.flatten([
-                            CASE WHEN r.source_id IS NULL THEN [] ELSE split(r.source_id, '{GRAPH_FIELD_SEP}') END,
-                            split(edge.source_id_field, '{GRAPH_FIELD_SEP}')
-                        ])
-                    ),
-                    '{GRAPH_FIELD_SEP}'
-                ),
-                r.order = CASE
-                    WHEN r.order IS NULL THEN edge.order
-                    ELSE apoc.math.minLong(r.order, edge.order)
-                END
+            SET r += edge.edge_data
+            SET r.relation_type = edge.relation_type
             """,
             edges=edges_params
         )
