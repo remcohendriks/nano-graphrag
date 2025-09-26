@@ -85,6 +85,7 @@ class TestGraphRAGIntegration:
         mock_graph = MagicMock()
         mock_graph.upsert_node = AsyncMock()
         mock_graph.upsert_edge = AsyncMock()
+        mock_graph.execute_document_batch = AsyncMock()  # Add batch execution mock
         mock_graph.get_node = AsyncMock(return_value=None)
         mock_graph.has_node = AsyncMock(return_value=False)
         mock_graph.has_edge = AsyncMock(return_value=False)
@@ -118,8 +119,8 @@ class TestGraphRAGIntegration:
         # Verify extraction was called with correct chunks
         rag.entity_extractor.extract.assert_called_once_with(chunks)
 
-        # Verify graph storage was updated
-        assert mock_graph.upsert_node.called
+        # Verify graph storage was updated with batch operation
+        assert mock_graph.execute_document_batch.called
         assert mock_vdb.upsert.called
         assert result == mock_graph
 

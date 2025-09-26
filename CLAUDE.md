@@ -47,6 +47,9 @@ The system supports multiple LLM providers with hot-swappable configurations:
 - **Max Async Connections**: 16 concurrent requests
 - **Response Caching**: Built-in LLM response caching via `llm_response_cache`
 - **Retry Logic**: Tenacity-based retry with exponential backoff
+- **Community Report Token Management**:
+  - `community_report_token_budget_ratio`: Use portion of model capacity (default: 0.75)
+  - `community_report_chat_overhead`: Reserve tokens for chat template (default: 1000)
 
 ### Embedding Systems
 
@@ -220,6 +223,10 @@ AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 AWS_REGION=us-east-1
 
+# Community Report Token Management
+COMMUNITY_REPORT_TOKEN_BUDGET_RATIO=0.75  # Use 75% of model capacity
+COMMUNITY_REPORT_CHAT_OVERHEAD=1000       # Reserve tokens for chat template
+
 # DeepSeek Models (modified version)
 DEEPSEEK_GREAT_MODEL=deepseek-reasoner
 DEEPSEEK_GOOD_MODEL=deepseek-chat
@@ -337,6 +344,32 @@ Additional in modified version:
 3. **Storage Choice**: HNSW for large-scale, NanoDB for prototyping
 4. **Caching**: Enable LLM cache for development
 5. **Community Size**: Keep max_graph_cluster_size reasonable (10-20)
+6. **Token Management**: For local LLMs with smaller context windows:
+   - Set `COMMUNITY_REPORT_TOKEN_BUDGET_RATIO=0.5` for very conservative usage
+   - Increase `COMMUNITY_REPORT_CHAT_OVERHEAD` if using complex chat templates
+   - Monitor logs for token truncation warnings
+
+## Troubleshooting
+
+### Token Limit Errors
+If you encounter errors like "Token limit exceeded" during community report generation:
+
+1. **Symptoms**:
+   - Error: `Trying to keep the first X tokens when context overflows`
+   - Community processing fails partway through (e.g., at 70/300 communities)
+
+2. **Solutions**:
+   - Reduce `COMMUNITY_REPORT_TOKEN_BUDGET_RATIO` to 0.5 or lower
+   - Increase `COMMUNITY_REPORT_CHAT_OVERHEAD` to 2000 or more
+   - Reduce `max_graph_cluster_size` to create smaller communities
+   - Use a model with larger context window
+
+3. **Example Configuration for 32k Context Models**:
+   ```bash
+   COMMUNITY_REPORT_TOKEN_BUDGET_RATIO=0.5  # Conservative 50% usage
+   COMMUNITY_REPORT_CHAT_OVERHEAD=2000      # Large safety margin
+   LLM_MAX_TOKENS=32000                     # Your model's limit
+   ```
 
 ## Migration Path
 

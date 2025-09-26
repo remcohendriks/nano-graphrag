@@ -3,7 +3,10 @@ import json
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Union, cast, List
+from typing import Any, Union, cast, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .._extraction import DocumentGraphBatch
 import networkx as nx
 import numpy as np
 import asyncio
@@ -168,9 +171,17 @@ class NetworkXStorage(BaseGraphStorage):
     async def upsert_edges_batch(
         self, edges_data: list[tuple[str, str, dict[str, str]]]
     ):
-        await asyncio.gather(*[self.upsert_edge(source_node_id, target_node_id, edge_data) 
+        await asyncio.gather(*[self.upsert_edge(source_node_id, target_node_id, edge_data)
                 for source_node_id, target_node_id, edge_data in edges_data])
-        
+
+    async def execute_document_batch(self, batch: 'DocumentGraphBatch') -> None:
+        """Execute batch operations for NetworkX (no transaction needed)."""
+        # NetworkX is in-memory, so we just process sequentially
+        for node_id, node_data in batch.nodes:
+            await self.upsert_node(node_id, node_data)
+        for src_id, tgt_id, edge_data in batch.edges:
+            await self.upsert_edge(src_id, tgt_id, edge_data)
+
     async def clustering(self, algorithm: str):
         if algorithm not in self._clustering_algorithms:
             raise ValueError(f"Clustering algorithm {algorithm} not supported")
