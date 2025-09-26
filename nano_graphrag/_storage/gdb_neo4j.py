@@ -630,7 +630,8 @@ class Neo4jStorage(BaseGraphStorage):
             reraise=True
         )
         async def _execute_with_retry():
-            chunks = batch.chunk(max_size=10)
+            # Use configured batch size instead of hardcoded 10
+            chunks = batch.chunk(max_size=self.neo4j_batch_size)
             for chunk_idx, chunk in enumerate(chunks):
                 await self._process_batch_chunk(chunk, chunk_idx)
 

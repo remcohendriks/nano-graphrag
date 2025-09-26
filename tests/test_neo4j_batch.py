@@ -34,6 +34,7 @@ def mock_neo4j_storage():
         storage.neo4j_url = "neo4j://localhost"
         storage.neo4j_auth = ("neo4j", "password")
         storage.neo4j_database = "neo4j"
+        storage.neo4j_batch_size = 1000  # Set default batch size
 
         # Mock the driver
         storage.async_driver = AsyncMock()
@@ -205,6 +206,8 @@ class TestNeo4jBatchTransaction:
     async def test_batch_with_chunking(self, mock_neo4j_storage):
         """Test batch execution with chunking."""
         storage = mock_neo4j_storage
+        # Set smaller batch size for testing chunking
+        storage.neo4j_batch_size = 10
 
         batch = DocumentGraphBatch()
         # Add 25 nodes to force chunking

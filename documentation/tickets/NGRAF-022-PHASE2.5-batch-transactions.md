@@ -1,99 +1,78 @@
-# NGRAF-022 Phase 2.5: Controlled Parallel Inserts & Batch Tuning
+# NGRAF-022 Phase 2.5: Wire Up Batch Transactions
 
 ## User Story
-As a platform engineer, I need to reintroduce controlled parallelism for document ingestion while keeping Neo4j deadlock-free, so that large backfills finish in acceptable time without sacrificing the stability we achieved in Phase 2.
+As a platform engineer, I need document ingestion to use the existing batch transaction pipeline so that each document hits Neo4j with a handful of deterministic `UNWIND` queries instead of hundreds of single-row MERGEs, restoring the throughput we expected when Phase 2 introduced the new extractor abstraction.
 
 ## Current State
-- Phase 2 moved ingestion to a strict serial loop (`nano_graphrag/graphrag.py:413-416`) to avoid `Neo.TransientError.Transaction.DeadlockDetected` when multiple documents touched the same entities.
-- Each document now builds a `DocumentGraphBatch` and executes a single Neo4j transaction (`nano_graphrag/_extraction.py:422-460` → `nano_graphrag/_storage/gdb_neo4j.py:600-661`). Deadlocks are gone, but throughput dropped ~5× compared with the original `asyncio.gather` approach.
-- Batch execution still slices nodes/edges into `max_size=10` chunks (`nano_graphrag/_extraction.py:43-55`); large documents therefore incur dozens of sequential UNWIND round-trips even within a single transaction.
+- `GraphRAG._init_functions()` still assigns `self.entity_extraction_func = self._extract_entities_wrapper` (`nano_graphrag/graphrag.py:236`).
+- `_extract_entities_wrapper` iterates the extracted entities and edges and calls `_merge_nodes_then_upsert` / `_merge_edges_then_upsert` for every key (`nano_graphrag/graphrag.py:270-302`). Each helper ends up invoking `Neo4jStorage.upsert_node` or `upsert_edge`, which wraps the batch helpers but with a singleton payload, producing one round-trip per entity/relationship (`nano_graphrag/_extraction.py:164-213`, `nano_graphrag/_storage/gdb_neo4j.py:420-520`).
+- The real batch implementation (`extract_entities` in `_extraction.py:271-470`) builds a `DocumentGraphBatch`, merges all nodes/edges, and calls `execute_document_batch`, but nothing in the main ingestion flow reaches that function.
+- Result: a document with ~50 entities and ~75 relationships still spawns ~125 separate transactions even though the batch infrastructure exists.
 
 ## Problem Statement
-We need to (1) safely allow multiple documents in flight when they do not touch the same entity IDs, and (2) reduce the number of round-trips a single document makes inside its transaction. Without these improvements, ingesting hundreds of medium documents takes hours.
+Phase 2 removed document-level parallelism to eliminate deadlocks, but we never actually switched to the batched write path. The primary bottleneck is therefore the transaction count per document, not the lack of inter-document concurrency. Until we fix this wiring issue, higher-level optimisations (chunk tuning, entity-level locks, etc.) are premature.
 
 ## Objectives
-1. Introduce an application-level locking layer that enforces a consistent lock order for shared entity IDs across concurrent documents.
-2. Replace the per-document `for` loop with a bounded concurrency worker pool that leverages the lock layer.
-3. Tune the batch executor so that a document submits larger UNWIND payloads per transaction chunk, minimizing network chatter.
-4. Add observability around waiting time, retries, and chunk counts to validate the tuning in staging.
+1. Rewire the ingestion flow so that documents use a `DocumentGraphBatch` and `execute_document_batch()`.
+2. Ensure we retain the new `entity_extractor` abstraction while batching writes (no regression to the legacy parser).
+3. Leverage the existing `NEO4J_BATCH_SIZE` configuration by threading it into the document batching path.
+4. Add instrumentation to confirm the number of Neo4j transactions per document before and after the change.
 
 ## Detailed Plan
 
-### 1. Entity-Level Lock Coordinator
-Create a reusable helper to guard Neo4j writes:
-```python
-# nano_graphrag/_coordination.py
-class EntityLockCoordinator:
-    def __init__(self):
-        self._locks = collections.defaultdict(asyncio.Lock)
-        self._global = asyncio.Lock()
+### 1. Update `_extract_entities_wrapper`
+- After collecting `maybe_nodes`/`maybe_edges`, replace the per-entity `for` loops with the same logic used in `_extraction.extract_entities`:
+  ```python
+  from nano_graphrag._extraction import (
+      DocumentGraphBatch,
+      _merge_nodes_for_batch,
+      _merge_edges_for_batch
+  )
+  batch = DocumentGraphBatch()
+  all_entities_data = []
 
-    async def lock_many(self, entity_ids: Iterable[str]):
-        ids = sorted(set(entity_ids))
-        async with self._global:
-            locks = [self._locks[i] for i in ids]
-        for lock in locks:
-            await lock.acquire()
-        return LocksGuard(locks)
-```
-Usage inside `_extract_entities_wrapper`:
-```python
-entity_ids = list(maybe_nodes.keys()) + [edge[0] for edge in maybe_edges] + [edge[1] for edge in maybe_edges]
-async with self.entity_lock_coordinator.lock_many(entity_ids):
-    await graph_storage.execute_document_batch(batch)
-```
-This guarantees consistent lock ordering and prevents the circular wait pattern that triggered Neo4j deadlocks.
+  for entity_name, nodes_data in maybe_nodes.items():
+      merged_name, merged_data = await _merge_nodes_for_batch(...)
+      batch.add_node(merged_name, merged_data)
+      # collect data for VDB update
 
-### 2. Bounded Parallel Document Processing
-Update `GraphRAG.ainsert()` to run documents through a worker pool:
-```python
-semaphore = asyncio.Semaphore(self.config.storage.neo4j_max_parallel_docs)
-async def worker(doc_idx, doc):
-    async with semaphore:
-        await process_single_document(doc, doc_idx)
-await asyncio.gather(*(worker(i, doc) for i, doc in enumerate(string_or_strings)))
-```
-`neo4j_max_parallel_docs` becomes a new config knob (default 2). The entity lock coordinator ensures that overlapping documents serialize, while unrelated documents progress concurrently.
+  for (src_id, tgt_id), edges_data in maybe_edges.items():
+      await _merge_edges_for_batch(src_id, tgt_id, edges_data, ..., batch=batch)
 
-### 3. Batch Chunk Size and Combined UNWIND
-- Expose `DocumentGraphBatch.chunk(max_size)` as configurable via `NEO4J_BATCH_CHUNK_SIZE` to raise the default from 10 to e.g. 100.
-- Collapse node/edge writes into a single Cypher statement per chunk (`_process_batch_chunk`):
-```cypher
-UNWIND $nodes AS node
-MERGE (n:`{namespace}` {id: node.id})
-SET n += node.data
-WITH $edges AS edges
-UNWIND edges AS edge
-MATCH (s:`{namespace}` {id: edge.source_id})
-MATCH (t:`{namespace}` {id: edge.target_id})
-MERGE (s)-[r:RELATED]->(t)
-SET r += edge.edge_data
-```
-This keeps lock acquisition deterministic and halves the number of driver round-trips.
+  await knwoledge_graph_inst.execute_document_batch(batch)
+  ```
+- Remove the `_merge_nodes_then_upsert` / `_merge_edges_then_upsert` calls from the wrapper entirely; keep those helpers for any legacy call sites (tests still reference them).
 
-### 4. Instrumentation
-Add structured logs and counters:
-- Wait duration for entity locks.
-- Number of chunks per document and average chunk size.
-- TransientError retries (still using Tenacity).
-Expose the data through the existing logging framework so we can compare staging runs before/after.
+### 2. Respect `neo4j_batch_size`
+- `DocumentGraphBatch.chunk()` currently hardcodes `max_size=10`. Plumb `global_config["addon_params"].get("neo4j_batch_size", 1000)` through `_extract_entities_wrapper` into `execute_document_batch` so the chunk size follows the operator-configured value.
+- If passing the size directly is messy, add a `chunk_size` attribute to `DocumentGraphBatch` or expose a setter before executing the batch.
+
+### 3. Instrumentation & Validation
+- Extend the existing `_operation_counts` or add a scoped logger entry to emit `batch.nodes`, `batch.edges`, and the number of chunks processed inside `execute_document_batch` (can be derived from `len(batch.chunk(...))`).
+- Capture the transaction count before and after wiring the batch path (a simple integration test can assert `self._operation_counts['upsert_node']` stays at zero while `execute_document_batch` increments a new counter).
+- Update or add an integration test that processes a fixture document and asserts Neo4j gets ≤ `ceil((nodes+edges)/neo4j_batch_size)` transactions instead of `nodes+edges` transactions.
+
+### 4. Documentation
+- Document the new behaviour and configuration hook in `docs/use_neo4j_for_graphrag.md` so operators know `NEO4J_BATCH_SIZE` now also governs document ingestion.
+
+## Out of Scope / Follow-Up
+- Inter-document parallelism and entity-level locking remain future work (Phase 3). We need fresh metrics after batching is active before deciding on additional coordination strategies.
+- Optimising Neo4j session reuse inside `execute_document_batch` is optional once the main wiring is complete.
 
 ## Risks & Mitigations
-- **Lock explosion**: Hot entities could create a convoy. Mitigate with metrics; if needed, add timeout + backoff before retrying lock acquisition.
-- **Increased memory in a chunk**: Larger UNWIND batches raise payload size. Neo4j’s limit is generous, but keep `NEO4J_BATCH_CHUNK_SIZE` configurable and default to a conservative value (100).
-- **Config drift**: New knobs (`neo4j_max_parallel_docs`, `NEO4J_BATCH_CHUNK_SIZE`) must flow through `GraphRAGConfig` and docs; include defaults in `.env.example`.
+- **Regression in new extractor abstraction**: Ensure `_extract_entities_wrapper` still returns `all_entities_data` for the vector DB update and preserves entity type mapping.
+- **Neo4j payload limits**: Continue to respect `neo4j_batch_size` and rely on Tenacity retries to handle transient errors.
+- **Legacy helper usage**: Confirm no external code paths still call `_merge_nodes_then_upsert`; keep them available until all tests pass with the new path.
 
 ## Validation Strategy
-1. Unit tests for `EntityLockCoordinator` (ordering, reentrancy, release).
-2. Stress test: simulate overlapping documents (>=10) and assert zero deadlocks, bounded lock wait, and successful completion.
-3. Performance regression suite: measure total insert time and Neo4j query count before/after on a 300-document fixture.
-4. Manual staging run capturing metrics for log review.
+1. Unit test asserting `_extract_entities_wrapper` calls `execute_document_batch` exactly once per document.
+2. Integration test comparing transaction counters before/after the change on a sample document set.
+3. Manual staging run logging transaction counts and overall ingestion time.
 
 ## Opinion
-Phase 2 gave us safety but sacrificed throughput. Coordinating writes at the application layer lets us reclaim parallelism without depending on Neo4j’s internal lock scheduler, which remains the unpredictable part of the system. Because we already batch nodes and edges deterministically, the incremental changes above are localised and align with the architecture: entity-awareness lives close to extraction, transaction batching remains in the storage layer, and `GraphRAGConfig` becomes the single place to tune behaviour. By instrumenting the new path we also future-proof ingestion against regressions when dataset size or model throughput grows.
+The deadlock fix gave us correctness but not the throughput gains we expected, simply because the ingestion flow never started using the batch pipeline. Wiring `DocumentGraphBatch` into `_extract_entities_wrapper` is the minimal surgical change that unlocks the performance work already delivered in `_extraction.py`. Once that foundation is in place we can evaluate chunk tuning or higher-level coordination with real data rather than assumptions.
 
 ## References
-- `_extract_entities_wrapper` batching: `nano_graphrag/_extraction.py:422-460`
-- Current sequential guard: `nano_graphrag/graphrag.py:413-416`
-- Batch executor: `nano_graphrag/_storage/gdb_neo4j.py:600-661`
-- Tenacity retry handling: `nano_graphrag/_storage/gdb_neo4j.py:629-661`
+- Wrapper path still issuing single upserts: `nano_graphrag/graphrag.py:238-308`
+- Batch pipeline currently unused: `nano_graphrag/_extraction.py:271-470`
+- Neo4j batch helpers and config: `nano_graphrag/_storage/gdb_neo4j.py:420-640`, `nano_graphrag/config.py:152-454`

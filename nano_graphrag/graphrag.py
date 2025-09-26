@@ -246,8 +246,9 @@ class GraphRAG:
     ) -> Optional[BaseGraphStorage]:
         """Wrapper to use new extractor with legacy interface."""
         from nano_graphrag._extraction import (
-            _merge_nodes_then_upsert,
-            _merge_edges_then_upsert
+            DocumentGraphBatch,
+            _merge_nodes_for_batch,
+            _merge_edges_for_batch
         )
         from nano_graphrag._utils import compute_mdhash_id
         from collections import defaultdict
@@ -290,15 +291,29 @@ class GraphRAG:
                 edge_data["relation_type"] = map_relation_type(description, relation_patterns)
             maybe_edges[(src_id, tgt_id)].append(edge_data)
 
-        # Merge and upsert nodes sequentially to avoid deadlocks
+        # Create batch for all operations
+        batch = DocumentGraphBatch()
         all_entities_data = []
-        for k, v in maybe_nodes.items():
-            entity_data = await _merge_nodes_then_upsert(k, v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
+
+        # Merge nodes and add to batch (no DB calls)
+        for entity_name, nodes_data in maybe_nodes.items():
+            merged_name, merged_data = await _merge_nodes_for_batch(
+                entity_name, nodes_data, knwoledge_graph_inst, global_config, tokenizer_wrapper
+            )
+            batch.add_node(merged_name, merged_data)
+            entity_data = merged_data.copy()
+            entity_data["entity_name"] = entity_name
             all_entities_data.append(entity_data)
 
-        # Merge and upsert edges sequentially to avoid deadlocks
-        for k, v in maybe_edges.items():
-            await _merge_edges_then_upsert(k[0], k[1], v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
+        # Merge edges and add to batch (no DB calls)
+        for (src_id, tgt_id), edges_data in maybe_edges.items():
+            await _merge_edges_for_batch(
+                src_id, tgt_id, edges_data, knwoledge_graph_inst, global_config, tokenizer_wrapper, batch
+            )
+
+        # Execute batch in single transaction
+        if batch.nodes or batch.edges:
+            await knwoledge_graph_inst.execute_document_batch(batch)
 
         if not len(all_entities_data):
             logger.warning("Didn't extract any entities, maybe your LLM is not working")
