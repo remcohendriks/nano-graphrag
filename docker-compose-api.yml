@@ -49,27 +49,31 @@ services:
       # LLM settings (use environment variables)
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       LLM_PROVIDER: openai
-      # LLM_MODEL: gpt-5-mini
-      LLM_MODEL: qwen3-30b-a3b-instruct-2507
-      LLM_BASE_URL: http://192.168.1.5:9090/v1
-      LLM_MAX_CONCURRENT: 1
-      LLM_REQUEST_TIMEOUT: 120.0
+      LLM_MODEL: gpt-5-mini
+      # LLM_MODEL: qwen3-30b-a3b-instruct-2507
+      # LLM_BASE_URL: http://192.168.1.5:9090/v1
+      # LLM_MAX_CONCURRENT: 2
+      LLM_MAX_CONCURRENT: 8
+      # LLM_MAX_TOKENS: 32000
+      LLM_MAX_TOKENS: 256000
+      LLM_REQUEST_TIMEOUT: 240.0 # llm can only do 1 request at a time, so set timeout high
 
       EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: text-embedding-3-large
-      EMBEDDING_DIMENSION: 3072
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_DIMENSION: 1536
+      # EMBEDDING_DIMENSION: 3072 - large model
 
-      # Chunking settings optimized for gpt-5-mini (1M input tokens)
-      CHUNKING_SIZE: 20000
-      CHUNKING_OVERLAP: 500
+      # Chunking settings optimized for local model
+      CHUNKING_SIZE: 8192
+      CHUNKING_OVERLAP: 512
 
       # Entity extraction settings
       ENTITY_MAX_GLEANING: 0
-      ENTITY_MAX_CONTINUATIONS: 10
+      ENTITY_MAX_CONTINUATIONS: 3
       ENTITY_TYPES: "PERSON,ORGANIZATION,LOCATION,EVENT,CONCEPT,EXECUTIVE_ORDER,STATUTE,REGULATION,CASE,COURT"
 
       # Query settings
-      QUERY_LOCAL_MAX_TOKEN_FOR_TEXT_UNIT: 100000
+      QUERY_LOCAL_MAX_TOKEN_FOR_TEXT_UNIT: 32000
 
       # Hybrid search settings
       ENABLE_HYBRID_SEARCH: ${ENABLE_HYBRID_SEARCH:-true}

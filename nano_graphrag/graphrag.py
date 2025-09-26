@@ -290,21 +290,15 @@ class GraphRAG:
                 edge_data["relation_type"] = map_relation_type(description, relation_patterns)
             maybe_edges[(src_id, tgt_id)].append(edge_data)
 
-        # Merge and upsert nodes
-        all_entities_data = await asyncio.gather(
-            *[
-                _merge_nodes_then_upsert(k, v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
-                for k, v in maybe_nodes.items()
-            ]
-        )
+        # Merge and upsert nodes sequentially to avoid deadlocks
+        all_entities_data = []
+        for k, v in maybe_nodes.items():
+            entity_data = await _merge_nodes_then_upsert(k, v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
+            all_entities_data.append(entity_data)
 
-        # Merge and upsert edges
-        await asyncio.gather(
-            *[
-                _merge_edges_then_upsert(k[0], k[1], v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
-                for k, v in maybe_edges.items()
-            ]
-        )
+        # Merge and upsert edges sequentially to avoid deadlocks
+        for k, v in maybe_edges.items():
+            await _merge_edges_then_upsert(k[0], k[1], v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
 
         if not len(all_entities_data):
             logger.warning("Didn't extract any entities, maybe your LLM is not working")
