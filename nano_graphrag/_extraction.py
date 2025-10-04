@@ -163,7 +163,7 @@ async def _merge_nodes_for_batch(
         entity_type=entity_type,
         description=description,
         source_id=source_id,
-        has_vector=existing_has_vector or True,
+        has_vector=existing_has_vector,
     )
     return entity_name, node_data
 
@@ -484,9 +484,9 @@ async def extract_entities(
             await entity_vdb.upsert(data_for_vdb)
             logger.info(f"[POINT-TRACK] entity_vdb.upsert() completed successfully for {len(data_for_vdb)} entities")
 
-            entity_ids = list(data_for_vdb.keys())
-            await graph_storage.batch_update_node_field(entity_ids, "has_vector", True)
-            logger.info(f"[POINT-TRACK] Updated has_vector=True for {len(entity_ids)} entities in Neo4j")
+            entity_names = [dp["entity_name"].strip('"').strip("'") for dp in all_entities_data]
+            await graph_storage.batch_update_node_field(entity_names, "has_vector", True)
+            logger.info(f"[POINT-TRACK] Updated has_vector=True for {len(entity_names)} entities in Neo4j")
         except Exception as e:
             logger.error(f"[POINT-TRACK] CRITICAL: entity_vdb.upsert() failed: {type(e).__name__}: {e}")
             logger.error(f"[POINT-TRACK] Entity IDs that failed to upsert: {list(data_for_vdb.keys())}")

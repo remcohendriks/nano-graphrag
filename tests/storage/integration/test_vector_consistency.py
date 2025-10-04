@@ -126,7 +126,7 @@ async def test_placeholder_nodes_have_has_vector_false(neo4j_storage, qdrant_sto
     tokenizer = TokenizerWrapper(tokenizer_type="tiktoken", model_name="gpt-4")
 
     await _merge_edges_for_batch(
-        src_id, tgt_id, edges_data, batch, neo4j_storage, global_config, tokenizer
+        src_id, tgt_id, edges_data, neo4j_storage, global_config, tokenizer, batch
     )
 
     placeholder_nodes = [node for node in batch.nodes if node[0] in [src_id, tgt_id]]
