@@ -60,30 +60,29 @@ async def lifespan(app: FastAPI):
     # Start with complete GraphRAG config from environment
     config = GraphRAGConfig.from_env()
 
-    # Build storage config override from API settings with all parameters
-    storage_kwargs = {
+    # Preserve environment config (hybrid_search, node2vec, etc.) and override API settings
+    storage_overrides = {
         "working_dir": settings.working_dir,
         "graph_backend": settings.graph_backend,
         "vector_backend": settings.vector_backend,
         "kv_backend": settings.kv_backend,
     }
 
-    # Add backend-specific configurations from API settings
     if settings.neo4j_url:
-        storage_kwargs["neo4j_url"] = settings.neo4j_url
-        storage_kwargs["neo4j_username"] = settings.neo4j_username
-        storage_kwargs["neo4j_password"] = settings.neo4j_password
-        storage_kwargs["neo4j_database"] = settings.neo4j_database
+        storage_overrides["neo4j_url"] = settings.neo4j_url
+        storage_overrides["neo4j_username"] = settings.neo4j_username
+        storage_overrides["neo4j_password"] = settings.neo4j_password
+        storage_overrides["neo4j_database"] = settings.neo4j_database
 
     if settings.qdrant_url:
-        storage_kwargs["qdrant_url"] = settings.qdrant_url
-        storage_kwargs["qdrant_api_key"] = settings.qdrant_api_key
+        storage_overrides["qdrant_url"] = settings.qdrant_url
+        storage_overrides["qdrant_api_key"] = settings.qdrant_api_key
 
     if settings.redis_url:
-        storage_kwargs["redis_url"] = settings.redis_url
-        storage_kwargs["redis_password"] = settings.redis_password
+        storage_overrides["redis_url"] = settings.redis_url
+        storage_overrides["redis_password"] = settings.redis_password
 
-    storage_config = StorageConfig(**storage_kwargs)
+    storage_config = dataclasses.replace(config.storage, **storage_overrides)
 
     # Replace only storage config, keeping LLM/embedding/query from env
     config = dataclasses.replace(config, storage=storage_config)

@@ -603,21 +603,21 @@ class Neo4jStorage(BaseGraphStorage):
             return
 
         async with self.async_driver.session(database=self.neo4j_database) as session:
-            async with session.begin_transaction() as tx:
-                try:
-                    if chunk.nodes:
-                        nodes_by_type = self._prepare_batch_nodes(chunk.nodes)
-                        await self._execute_batch_nodes(tx, nodes_by_type)
+            async def execute_batch(tx):
+                """Execute batch operations within a transaction."""
+                if chunk.nodes:
+                    nodes_by_type = self._prepare_batch_nodes(chunk.nodes)
+                    await self._execute_batch_nodes(tx, nodes_by_type)
 
-                    if chunk.edges:
-                        edges_params = self._prepare_batch_edges(chunk.edges)
-                        await self._execute_batch_edges(tx, edges_params)
+                if chunk.edges:
+                    edges_params = self._prepare_batch_edges(chunk.edges)
+                    await self._execute_batch_edges(tx, edges_params)
 
-                    await tx.commit()
-                except Exception as e:
-                    await tx.rollback()
-                    logger.error(f"Batch transaction failed for chunk {chunk_idx}: {e}")
-                    raise
+            try:
+                await session.execute_write(execute_batch)
+            except Exception as e:
+                logger.error(f"Batch transaction failed for chunk {chunk_idx}: {e}")
+                raise
 
     async def execute_document_batch(self, batch: 'DocumentGraphBatch') -> None:
         """Execute a batch of document operations in a single transaction with retry logic."""
@@ -636,6 +636,23 @@ class Neo4jStorage(BaseGraphStorage):
                 await self._process_batch_chunk(chunk, chunk_idx)
 
         await _execute_with_retry()
+
+    async def batch_update_node_field(self, node_ids: List[str], field_name: str, value: Any) -> None:
+        """Batch update a single field on multiple nodes."""
+        if not node_ids:
+            return
+
+        async with self.async_driver.session(database=self.neo4j_database) as session:
+            await session.run(
+                f"""
+                UNWIND $node_ids AS node_id
+                MATCH (n:`{self.namespace}` {{id: node_id}})
+                SET n.{field_name} = $value
+                """,
+                node_ids=node_ids,
+                value=value
+            )
+        logger.debug(f"Batch updated {field_name}={value} for {len(node_ids)} nodes")
 
     async def clustering(self, algorithm: str):
         if algorithm != "leiden":

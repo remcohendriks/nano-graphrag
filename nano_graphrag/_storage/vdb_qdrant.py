@@ -165,22 +165,39 @@ class QdrantVectorStorage(BaseVectorStorage):
         sparse_embeddings = None
         sparse_name_embeddings = None
         if self._enable_hybrid:
+            logger.info(f"[POINT-TRACK] Hybrid search enabled, generating sparse embeddings for {len(data)} entities")
             from ..llm.providers.sparse import SparseEmbeddingProvider
             provider = SparseEmbeddingProvider(config=self._hybrid_config)
             all_contents = [d.get("content", "") for d in data.values()]
-            sparse_embeddings = await provider.embed(all_contents)
+
+            try:
+                logger.debug(f"[POINT-TRACK] Calling SPLADE for content embeddings (count={len(all_contents)})")
+                sparse_embeddings = await provider.embed(all_contents)
+                logger.info(f"[POINT-TRACK] SPLADE content embeddings: SUCCESS (count={len(sparse_embeddings)})")
+            except Exception as e:
+                logger.error(f"[POINT-TRACK] SPLADE content embeddings: FAILED - {type(e).__name__}: {e}")
+                raise
 
             entity_names = [d.get("entity_name", "") for d in data.values()]
-            sparse_name_embeddings = await provider.embed(entity_names)
+            try:
+                logger.debug(f"[POINT-TRACK] Calling SPLADE for entity name embeddings (count={len(entity_names)})")
+                sparse_name_embeddings = await provider.embed(entity_names)
+                logger.info(f"[POINT-TRACK] SPLADE name embeddings: SUCCESS (count={len(sparse_name_embeddings)})")
+            except Exception as e:
+                logger.error(f"[POINT-TRACK] SPLADE name embeddings: FAILED - {type(e).__name__}: {e}")
+                raise
+
             logger.debug(f"Generated sparse embeddings for {len(all_contents)} documents and names")
 
         # Second pass: create points
         embedding_idx = 0
         sparse_idx = 0
-        
+
+        logger.info(f"[POINT-TRACK] Creating {len(data)} Qdrant points from entity IDs")
         for content_key, content_data in data.items():
             # Use xxhash for deterministic ID generation
             point_id = xxhash.xxh64_intdigest(content_key.encode())
+            logger.debug(f"[POINT-TRACK] entity_id={content_key} → point_id={point_id} (entity_name={content_data.get('entity_name', 'N/A')})")
             
             # Get or use provided embedding
             if "embedding" in content_data:
@@ -233,21 +250,32 @@ class QdrantVectorStorage(BaseVectorStorage):
         # Upsert to Qdrant in batches
         batch_size = 100  # Configurable batch size for better performance
         total_batches = (len(points) + batch_size - 1) // batch_size
-        
+
+        logger.info(f"[POINT-TRACK] Upserting {len(points)} points to Qdrant in {total_batches} batches")
         for i in range(0, len(points), batch_size):
             batch = points[i:i + batch_size]
             batch_num = i // batch_size + 1
-            
+            batch_point_ids = [p.id for p in batch]
+
+            logger.debug(f"[POINT-TRACK] Batch {batch_num}/{total_batches}: {len(batch)} points, IDs={batch_point_ids[:5]}{'...' if len(batch_point_ids) > 5 else ''}")
+
             client = await self._get_client()
-            await client.upsert(
-                collection_name=self.namespace,
-                points=batch,
-                wait=True  # Ensure consistency
-            )
-            
+            try:
+                await client.upsert(
+                    collection_name=self.namespace,
+                    points=batch,
+                    wait=True  # Ensure consistency
+                )
+                logger.debug(f"[POINT-TRACK] Batch {batch_num}/{total_batches}: SUCCESS")
+            except Exception as e:
+                logger.error(f"[POINT-TRACK] Batch {batch_num}/{total_batches}: FAILED - {type(e).__name__}: {e}")
+                logger.error(f"[POINT-TRACK] Failed point IDs: {batch_point_ids}")
+                raise
+
             if batch_num % 10 == 0 or batch_num == total_batches:
                 logger.debug(f"Upserted batch {batch_num}/{total_batches}")
-        
+
+        logger.info(f"[POINT-TRACK] Successfully upserted {len(points)} points to Qdrant")
         logger.info(f"Successfully upserted {len(points)} points to Qdrant")
 
     async def update_payload(self, updates: Dict[str, Dict[str, Any]]) -> None:
@@ -258,8 +286,15 @@ class QdrantVectorStorage(BaseVectorStorage):
         await self._ensure_collection()
         client = await self._get_client()
 
+        logger.info(f"[POINT-TRACK] update_payload called with {len(updates)} entities")
+        successful_updates = 0
+        failed_updates = []
+
         for entity_id, payload_updates in updates.items():
             point_id = xxhash.xxh64_intdigest(entity_id.encode())
+            entity_name = payload_updates.get("entity_name", "N/A")
+
+            logger.debug(f"[POINT-TRACK] Updating entity_id={entity_id} → point_id={point_id} (entity_name={entity_name})")
 
             filtered_fields = {"content", "embedding"}
             if any(k in filtered_fields for k in payload_updates):
@@ -268,12 +303,30 @@ class QdrantVectorStorage(BaseVectorStorage):
             safe_updates = {k: v for k, v in payload_updates.items() if k not in filtered_fields}
             safe_updates["id"] = entity_id
 
-            await client.set_payload(
-                collection_name=self.namespace,
-                payload=safe_updates,
-                points=[point_id]
-            )
+            try:
+                await client.set_payload(
+                    collection_name=self.namespace,
+                    payload=safe_updates,
+                    points=[point_id]
+                )
+                successful_updates += 1
+                logger.debug(f"[POINT-TRACK] Point {point_id}: UPDATE SUCCESS")
+            except Exception as e:
+                logger.error(f"[POINT-TRACK] Point {point_id}: UPDATE FAILED - {type(e).__name__}: {e}")
+                failed_updates.append({
+                    "entity_id": entity_id,
+                    "point_id": point_id,
+                    "entity_name": entity_name,
+                    "error": str(e)
+                })
 
+        if failed_updates:
+            logger.error(f"[POINT-TRACK] update_payload: {successful_updates} succeeded, {len(failed_updates)} FAILED")
+            logger.error(f"[POINT-TRACK] Failed updates: {failed_updates}")
+            logger.error(f"[POINT-TRACK] UNEXPECTED: Points missing after has_vector filtering - indicates bug")
+            raise Exception(f"Failed to update {len(failed_updates)} points in Qdrant: {failed_updates[0]}")
+
+        logger.info(f"[POINT-TRACK] update_payload: ALL {successful_updates} updates successful")
         logger.info(f"Updated payload for {len(updates)} entities (vectors preserved)")
 
     async def _query_hybrid(self, client, query: str, query_embedding: list, top_k: int):

@@ -5,6 +5,12 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import List, Dict, Any
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +31,13 @@ class SparseEmbeddingProvider:
                 "Sparse embeddings will return empty vectors."
             )
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type((Exception,)),
+    )
     async def embed(self, texts: List[str]) -> List[Dict[str, Any]]:
-        """Generate sparse embeddings via external service."""
+        """Generate sparse embeddings via external service with retry logic."""
         if not texts:
             return []
 
@@ -41,37 +52,22 @@ class SparseEmbeddingProvider:
 
         logger.debug(f"Sending {len(texts)} texts to SPLADE service at {self._service_url}")
 
-        try:
-            # Use default timeout of 30 seconds for service calls
-            timeout = 30.0
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    f"{self._service_url}/embed",
-                    json={"texts": texts}
+        timeout = float(os.getenv("SPARSE_TIMEOUT_SECONDS", "60"))
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                f"{self._service_url}/embed",
+                json={"texts": texts}
+            )
+            response.raise_for_status()
+            result = response.json()
+            embeddings = result["embeddings"]
+
+            if embeddings and logger.isEnabledFor(logging.DEBUG):
+                non_zeros = [len(emb["indices"]) for emb in embeddings]
+                avg_non_zeros = sum(non_zeros) / len(non_zeros) if non_zeros else 0
+                logger.debug(
+                    f"Sparse encoding via service: {len(texts)} texts, "
+                    f"avg {avg_non_zeros:.1f} non-zero dims"
                 )
-                response.raise_for_status()
-                result = response.json()
-                embeddings = result["embeddings"]
 
-                # Log statistics
-                if embeddings and logger.isEnabledFor(logging.DEBUG):
-                    non_zeros = [len(emb["indices"]) for emb in embeddings]
-                    avg_non_zeros = sum(non_zeros) / len(non_zeros) if non_zeros else 0
-                    logger.debug(
-                        f"Sparse encoding via service: {len(texts)} texts, "
-                        f"avg {avg_non_zeros:.1f} non-zero dims"
-                    )
-
-                return embeddings
-
-        except httpx.TimeoutException:
-            logger.warning(f"SPLADE service timed out")
-            return [{"indices": [], "values": []} for _ in texts]
-
-        except httpx.HTTPStatusError as e:
-            logger.error(f"SPLADE service HTTP error {e.response.status_code}: {e.response.text}")
-            return [{"indices": [], "values": []} for _ in texts]
-
-        except Exception as e:
-            logger.error(f"SPLADE service call failed: {e}")
-            return [{"indices": [], "values": []} for _ in texts]
+            return embeddings

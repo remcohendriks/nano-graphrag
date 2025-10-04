@@ -479,6 +479,8 @@ class GraphRAG:
             schema = await self.chunk_entity_relation_graph.community_schema()
             all_node_ids = sorted({node_id for comm in schema.values() for node_id in comm.get("nodes", [])})
 
+            logger.info(f"[POINT-TRACK] Community generation complete, preparing to update {len(all_node_ids)} entities in vector DB")
+
             use_payload_update = (
                 hasattr(self.entities_vdb, 'update_payload') and
                 (self.config.storage.hybrid_search.enabled
@@ -486,15 +488,24 @@ class GraphRAG:
                  else self.global_config.get("enable_hybrid_search", False))
             )
 
+            logger.info(f"[POINT-TRACK] Vector DB update mode: {'PAYLOAD_ONLY (preserving embeddings)' if use_payload_update else 'FULL_UPSERT (re-embedding)'}")
+
             if use_payload_update:
-                # Payload-only update to preserve embeddings
                 from nano_graphrag._utils import compute_mdhash_id
                 updates = {}
+                skipped_no_vector = 0
+
                 for node_id in all_node_ids:
                     try:
                         node_data = await self.chunk_entity_relation_graph.get_node(node_id)
                         if not node_data:
                             continue
+
+                        if not node_data.get("has_vector", False):
+                            skipped_no_vector += 1
+                            logger.debug(f"[POINT-TRACK] Skipping {node_id} - has_vector=False")
+                            continue
+
                         description = (node_data.get("description", "") or "").strip()
                         if not description:
                             entity_name = (node_data.get("name") or node_id).strip()
@@ -512,9 +523,15 @@ class GraphRAG:
                     except Exception as e:
                         logger.debug(f"Could not update {node_id}: {e}")
 
+                logger.info(f"[POINT-TRACK] Community metrics: total={len(all_node_ids)}, will_update={len(updates)}, skipped_no_vector={skipped_no_vector}")
+
                 if updates:
                     logger.info(f"[COMMUNITY] Updating {len(updates)} entity payloads (preserving vectors)")
+                    logger.info(f"[POINT-TRACK] Calling update_payload for {len(updates)} entities, entity_ids={list(updates.keys())[:5]}{'...' if len(updates) > 5 else ''}")
                     await self.entities_vdb.update_payload(updates)
+                    logger.info(f"[POINT-TRACK] update_payload completed successfully")
+                else:
+                    logger.warning(f"[POINT-TRACK] No updates generated for payload-only path!")
             else:
                 # Fallback: full re-embedding path (recreates vectors, used when hybrid disabled)
                 from nano_graphrag._utils import compute_mdhash_id

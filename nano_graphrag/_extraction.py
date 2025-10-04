@@ -132,6 +132,7 @@ async def _merge_nodes_for_batch(
     already_entitiy_types = []
     already_source_ids = []
     already_description = []
+    existing_has_vector = False
 
     already_node = await graph_storage.get_node(entity_name)
     if already_node is not None:
@@ -140,6 +141,7 @@ async def _merge_nodes_for_batch(
             split_string_by_multi_markers(already_node["source_id"], [GRAPH_FIELD_SEP])
         )
         already_description.append(already_node["description"])
+        existing_has_vector = already_node.get("has_vector", False)
 
     entity_type = sorted(
         Counter(
@@ -161,6 +163,7 @@ async def _merge_nodes_for_batch(
         entity_type=entity_type,
         description=description,
         source_id=source_id,
+        has_vector=existing_has_vector or True,
     )
     return entity_name, node_data
 
@@ -225,6 +228,7 @@ async def _merge_edges_for_batch(
                     "source_id": source_id,
                     "description": description,
                     "entity_type": "UNKNOWN",
+                    "has_vector": False,
                 }
             )
 
@@ -465,14 +469,29 @@ async def extract_entities(
         logger.info(f"[EXTRACT] Updating entity vector DB with {len(all_entities_data)} entities...")
         vdb_start = time.time()
         data_for_vdb = {}
+        logger.info(f"[POINT-TRACK] Starting entity ID generation for {len(all_entities_data)} entities")
         for dp in all_entities_data:
             entity_name_clean = dp["entity_name"].strip('"').strip("'")
             entity_id = compute_mdhash_id(entity_name_clean, prefix="ent-")
+            logger.debug(f"[POINT-TRACK] Entity '{entity_name_clean}' → entity_id={entity_id}")
             data_for_vdb[entity_id] = {
                 "content": f"{entity_name_clean} {dp['description']}",
                 "entity_name": entity_name_clean,
             }
-        await entity_vdb.upsert(data_for_vdb)
+
+        logger.info(f"[POINT-TRACK] Generated {len(data_for_vdb)} entity IDs, calling entity_vdb.upsert()")
+        try:
+            await entity_vdb.upsert(data_for_vdb)
+            logger.info(f"[POINT-TRACK] entity_vdb.upsert() completed successfully for {len(data_for_vdb)} entities")
+
+            entity_ids = list(data_for_vdb.keys())
+            await graph_storage.batch_update_node_field(entity_ids, "has_vector", True)
+            logger.info(f"[POINT-TRACK] Updated has_vector=True for {len(entity_ids)} entities in Neo4j")
+        except Exception as e:
+            logger.error(f"[POINT-TRACK] CRITICAL: entity_vdb.upsert() failed: {type(e).__name__}: {e}")
+            logger.error(f"[POINT-TRACK] Entity IDs that failed to upsert: {list(data_for_vdb.keys())}")
+            raise
+
         vdb_time = time.time() - vdb_start
         logger.info(f"[EXTRACT] Vector DB updated in {vdb_time:.2f}s")
 

@@ -49,13 +49,13 @@ services:
       # LLM settings (use environment variables)
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       LLM_PROVIDER: openai
-      LLM_MODEL: gpt-5-mini
-      # LLM_MODEL: qwen3-30b-a3b-instruct-2507
-      # LLM_BASE_URL: http://192.168.1.5:9090/v1
-      # LLM_MAX_CONCURRENT: 2
-      LLM_MAX_CONCURRENT: 8
-      # LLM_MAX_TOKENS: 32000
-      LLM_MAX_TOKENS: 256000
+      # LLM_MODEL: gpt-5-mini
+      LLM_MODEL: qwen3-30b-a3b-instruct-2507
+      LLM_BASE_URL: http://192.168.1.5:9090/v1
+      LLM_MAX_CONCURRENT: 2
+      # LLM_MAX_CONCURRENT: 8
+      LLM_MAX_TOKENS: 32000
+      # LLM_MAX_TOKENS: 256000
       LLM_REQUEST_TIMEOUT: 240.0 # llm can only do 1 request at a time, so set timeout high
 
       EMBEDDING_PROVIDER: openai
@@ -63,9 +63,11 @@ services:
       EMBEDDING_DIMENSION: 1536
       # EMBEDDING_DIMENSION: 3072 - large model
 
+      # CHUNKING_SIZE: 32000
+      # CHUNKING_OVERLAP: 512
       # Chunking settings optimized for local model
       CHUNKING_SIZE: 8192
-      CHUNKING_OVERLAP: 512
+      CHUNKING_OVERLAP: 256
 
       # Entity extraction settings
       ENTITY_MAX_GLEANING: 0
@@ -78,6 +80,7 @@ services:
       # Hybrid search settings
       ENABLE_HYBRID_SEARCH: ${ENABLE_HYBRID_SEARCH:-true}
       SPARSE_SERVICE_URL: http://splade:8001
+      SPARSE_TIMEOUT_SECONDS: ${SPARSE_TIMEOUT_SECONDS:-60}
       RRF_K: ${RRF_K:-60}
       SPARSE_TOP_K_MULTIPLIER: ${SPARSE_TOP_K_MULTIPLIER:-2.0}
       DENSE_TOP_K_MULTIPLIER: ${DENSE_TOP_K_MULTIPLIER:-1.0}
