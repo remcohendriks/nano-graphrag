@@ -590,15 +590,16 @@ class GraphRAG:
         if param.mode == "naive" and not self.config.query.enable_naive_rag:
             raise ValueError("Naive RAG mode is disabled in config")
 
-        # Use config value for local_max_token_for_text_unit
-        param.local_max_token_for_text_unit = self.config.query.local_max_token_for_text_unit
-        
+        # Auto-scale token budgets for local queries based on LLM context window
+        if param.mode == "local":
+            param.scale_budgets_for_model(self.config.llm.max_tokens)
+
         # Override response_format for LMStudio (it doesn't support json_object format)
         import os
         if os.getenv("LLM_BASE_URL") and param.mode == "global":
             # Clear the response_format for LMStudio
             param.global_special_community_map_llm_kwargs = {}
-        
+
         # Get complete global config
         cfg = self._global_config()
         
@@ -648,10 +649,6 @@ class GraphRAG:
             await self.community_reports.index_done_callback()
         if self.llm_response_cache and hasattr(self.llm_response_cache, 'index_done_callback'):
             await self.llm_response_cache.index_done_callback()
-        
-        # Flush graph storage
-        if hasattr(self.chunk_entity_relation_graph, 'index_done_callback'):
-            await self.chunk_entity_relation_graph.index_done_callback()
         
         # Flush vector storage
         if self.entities_vdb and hasattr(self.entities_vdb, 'index_done_callback'):

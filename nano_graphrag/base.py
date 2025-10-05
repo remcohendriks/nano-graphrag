@@ -22,6 +22,7 @@ class QueryParam:
     local_max_token_for_text_unit: int = 100000
     local_max_token_for_local_context: int = 4800  # 12000 * 0.4
     local_max_token_for_community_report: int = 3200  # 12000 * 0.27
+    local_max_token_for_relationships: int = 3000
     local_community_single_one: bool = False
     # global search
     global_min_community_rating: float = 0
@@ -30,6 +31,14 @@ class QueryParam:
     global_special_community_map_llm_kwargs: dict = field(
         default_factory=lambda: {"response_format": {"type": "json_object"}}
     )
+
+    def scale_budgets_for_model(self, llm_max_tokens: int, reserved_output: int = 2000):
+        """Auto-scale token budgets based on LLM context window."""
+        available = llm_max_tokens - reserved_output
+        self.local_max_token_for_text_unit = int(available * 0.50)
+        self.local_max_token_for_community_report = int(available * 0.20)
+        self.local_max_token_for_local_context = int(available * 0.15)
+        self.local_max_token_for_relationships = int(available * 0.10)
 
 
 TextChunkSchema = TypedDict(
