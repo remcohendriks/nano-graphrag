@@ -60,6 +60,10 @@ class MockGraphStorage:
             "description": f"This is a very long description for {node_id} " * 10  # Make it long
         }
 
+    async def get_nodes_batch(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+        """Return mock node data for batch."""
+        return [await self.get_node(node_id) for node_id in node_ids]
+
     async def get_edge(self, src: str, tgt: str) -> Dict[str, Any]:
         """Return mock edge data."""
         return {
@@ -67,6 +71,10 @@ class MockGraphStorage:
             "relation_type": "RELATED",
             "weight": 1.0
         }
+
+    async def get_edges_batch(self, edges: List[tuple]) -> List[Dict[str, Any]]:
+        """Return mock edge data for batch."""
+        return [await self.get_edge(src, tgt) for src, tgt in edges]
 
     async def node_degrees_batch(self, node_ids: List[str]) -> List[int]:
         """Return mock node degrees."""

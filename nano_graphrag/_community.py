@@ -132,12 +132,8 @@ async def _pack_single_community_describe(
     nodes_in_order = sorted(community["nodes"])
     edges_in_order = sorted(community["edges"], key=lambda x: x[0] + x[1])
 
-    nodes_data = await asyncio.gather(
-        *[knowledge_graph_inst.get_node(n) for n in nodes_in_order]
-    )
-    edges_data = await asyncio.gather(
-        *[knowledge_graph_inst.get_edge(src, tgt) for src, tgt in edges_in_order]
-    )
+    nodes_data = await knowledge_graph_inst.get_nodes_batch(nodes_in_order)
+    edges_data = await knowledge_graph_inst.get_edges_batch(edges_in_order)
 
 
     # Define template and fixed overhead
@@ -406,6 +402,13 @@ async def generate_community_report(
     # This ensures sub-community reports are available for parent communities
     levels = sorted(set([c["level"] for c in community_values]), reverse=True)
     logger.info(f"[COMMUNITY] Processing {len(levels)} hierarchical levels: {levels}")
+    max_concurrency = global_config.get("community_report_max_concurrency", 8)
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def _bounded_form_report(community):
+        async with semaphore:
+            return await _form_single_community_report(community, community_datas)
+
     community_datas = {}
     for level in levels:
         level_start = time.time()
@@ -417,9 +420,11 @@ async def generate_community_report(
             ]
         )
         logger.info(f"[COMMUNITY] Level {level}: Processing {len(this_level_community_keys)} communities")
+        logger.debug(f"[COMMUNITY] Level {level}: Concurrency cap={max_concurrency}")
+
         this_level_communities_reports = await asyncio.gather(
             *[
-                _form_single_community_report(c, community_datas)
+                _bounded_form_report(c)
                 for c in this_level_community_values
             ]
         )

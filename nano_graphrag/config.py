@@ -16,9 +16,9 @@ class LLMConfig:
     cache_enabled: bool = True
     temperature: float = 0.0
     request_timeout: float = 30.0
-    # Community report token budget management
-    community_report_token_budget_ratio: float = 0.75  # Use 75% of model capacity for safety
-    community_report_chat_overhead: int = 1000  # Reserve tokens for system prompt and chat template
+    community_report_token_budget_ratio: float = 0.75
+    community_report_chat_overhead: int = 1000
+    community_report_max_concurrency: int = 8
     
     @classmethod
     def from_env(cls) -> 'LLMConfig':
@@ -32,7 +32,8 @@ class LLMConfig:
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.0")),
             request_timeout=float(os.getenv("LLM_REQUEST_TIMEOUT", "30.0")),
             community_report_token_budget_ratio=float(os.getenv("COMMUNITY_REPORT_TOKEN_BUDGET_RATIO", "0.75")),
-            community_report_chat_overhead=int(os.getenv("COMMUNITY_REPORT_CHAT_OVERHEAD", "1000"))
+            community_report_chat_overhead=int(os.getenv("COMMUNITY_REPORT_CHAT_OVERHEAD", "1000")),
+            community_report_max_concurrency=int(os.getenv("COMMUNITY_REPORT_MAX_CONCURRENCY", "8"))
         )
     
     def __post_init__(self):
@@ -509,6 +510,9 @@ class GraphRAGConfig:
             'always_create_working_dir': True,
             'addon_params': {},
             'hybrid_search': self.storage.hybrid_search,
+            'community_report_token_budget_ratio': self.llm.community_report_token_budget_ratio,
+            'community_report_chat_overhead': self.llm.community_report_chat_overhead,
+            'community_report_max_concurrency': self.llm.community_report_max_concurrency,
         }
 
         # Add HNSW-specific parameters if using hnswlib backend
