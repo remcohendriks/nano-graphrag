@@ -132,12 +132,8 @@ async def _pack_single_community_describe(
     nodes_in_order = sorted(community["nodes"])
     edges_in_order = sorted(community["edges"], key=lambda x: x[0] + x[1])
 
-    nodes_data = await asyncio.gather(
-        *[knowledge_graph_inst.get_node(n) for n in nodes_in_order]
-    )
-    edges_data = await asyncio.gather(
-        *[knowledge_graph_inst.get_edge(src, tgt) for src, tgt in edges_in_order]
-    )
+    nodes_data = await knowledge_graph_inst.get_nodes_batch(nodes_in_order)
+    edges_data = await knowledge_graph_inst.get_edges_batch(edges_in_order)
 
 
     # Define template and fixed overhead
@@ -337,6 +333,19 @@ async def generate_community_report(
 
     prompt_overhead = len(tokenizer_wrapper.encode(prompt_template.format(input_text="")))
 
+    # Get configurable safety factor for token budget (default 0.75 = use 75% of available tokens)
+    token_budget_ratio = global_config.get("community_report_token_budget_ratio", 0.75)
+    # Reserve tokens for: system prompt, chat template, response, and safety margin
+    chat_template_overhead = global_config.get("community_report_chat_overhead", 1000)
+
+    # Calculate conservative token budget for community description
+    available_tokens = int((global_config["best_model_max_token_size"] * token_budget_ratio))
+    community_description_budget = available_tokens - prompt_overhead - chat_template_overhead
+
+    logger.debug(f"[COMMUNITY] Token budget calculation: model_max={global_config['best_model_max_token_size']}, "
+                f"ratio={token_budget_ratio}, prompt_overhead={prompt_overhead}, "
+                f"chat_overhead={chat_template_overhead}, description_budget={community_description_budget}")
+
     async def _form_single_community_report(
         community: SingleCommunitySchema, already_reports: Dict[str, CommunitySchema]
     ) -> Dict[str, Any]:
@@ -345,26 +354,61 @@ async def generate_community_report(
         describe = await _pack_single_community_describe(
             knowledge_graph_inst,
             community,
-            tokenizer_wrapper=tokenizer_wrapper, 
-            max_token_size=global_config["best_model_max_token_size"] - prompt_overhead - 200,  # Extra tokens for chat template
+            tokenizer_wrapper=tokenizer_wrapper,
+            max_token_size=community_description_budget,
             already_reports=already_reports,
             global_config=global_config,
         )
         prompt = prompt_template.format(input_text=describe)
 
+        # Safety check: verify final prompt fits within model limits
+        final_token_count = len(tokenizer_wrapper.encode(prompt))
+        if final_token_count > available_tokens:
+            logger.warning(f"[COMMUNITY] Community {community.get('title', 'unknown')} prompt "
+                         f"exceeds budget ({final_token_count} > {available_tokens}). Truncating...")
+            # Truncate the description further if needed
+            reduced_budget = community_description_budget - (final_token_count - available_tokens)
+            describe = await _pack_single_community_describe(
+                knowledge_graph_inst,
+                community,
+                tokenizer_wrapper=tokenizer_wrapper,
+                max_token_size=max(100, reduced_budget),  # Keep at least 100 tokens
+                already_reports=already_reports,
+                global_config=global_config,
+            )
+            prompt = prompt_template.format(input_text=describe)
 
-        response = await use_llm_func(prompt, **llm_extra_kwargs)
-        data = use_string_json_convert_func(response)
-        already_processed += 1
-        now_ticks = PROMPTS["process_tickers"][already_processed % len(PROMPTS["process_tickers"])]
-        if already_processed % 10 == 0:
-            logger.info(f"[COMMUNITY] {now_ticks} Processed {already_processed}/{len(community_keys)} communities")
-        return data
+
+        try:
+            response = await use_llm_func(prompt, **llm_extra_kwargs)
+            data = use_string_json_convert_func(response)
+            already_processed += 1
+            now_ticks = PROMPTS["process_tickers"][already_processed % len(PROMPTS["process_tickers"])]
+            if already_processed % 10 == 0:
+                logger.info(f"[COMMUNITY] {now_ticks} Processed {already_processed}/{len(community_keys)} communities")
+            return data
+        except Exception as e:
+            logger.error(f"[COMMUNITY] Failed to generate report for community {community.get('title', 'unknown')}: {e}")
+            # Return minimal valid report on failure
+            return {
+                "title": community.get("title", "Unknown Community"),
+                "summary": "Report generation failed due to token limits.",
+                "rating": 5.0,
+                "rating_explanation": "Unable to fully analyze due to size constraints.",
+                "findings": [{"summary": "Analysis incomplete", "explanation": "Community too large for analysis."}]
+            }
 
     # Process communities level by level, starting from the lowest (most granular)
     # This ensures sub-community reports are available for parent communities
     levels = sorted(set([c["level"] for c in community_values]), reverse=True)
     logger.info(f"[COMMUNITY] Processing {len(levels)} hierarchical levels: {levels}")
+    max_concurrency = global_config.get("community_report_max_concurrency", 8)
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def _bounded_form_report(community):
+        async with semaphore:
+            return await _form_single_community_report(community, community_datas)
+
     community_datas = {}
     for level in levels:
         level_start = time.time()
@@ -376,9 +420,11 @@ async def generate_community_report(
             ]
         )
         logger.info(f"[COMMUNITY] Level {level}: Processing {len(this_level_community_keys)} communities")
+        logger.debug(f"[COMMUNITY] Level {level}: Concurrency cap={max_concurrency}")
+
         this_level_communities_reports = await asyncio.gather(
             *[
-                _form_single_community_report(c, community_datas)
+                _bounded_form_report(c)
                 for c in this_level_community_values
             ]
         )

@@ -246,8 +246,9 @@ class GraphRAG:
     ) -> Optional[BaseGraphStorage]:
         """Wrapper to use new extractor with legacy interface."""
         from nano_graphrag._extraction import (
-            _merge_nodes_then_upsert,
-            _merge_edges_then_upsert
+            DocumentGraphBatch,
+            _merge_nodes_for_batch,
+            _merge_edges_for_batch
         )
         from nano_graphrag._utils import compute_mdhash_id
         from collections import defaultdict
@@ -290,21 +291,29 @@ class GraphRAG:
                 edge_data["relation_type"] = map_relation_type(description, relation_patterns)
             maybe_edges[(src_id, tgt_id)].append(edge_data)
 
-        # Merge and upsert nodes
-        all_entities_data = await asyncio.gather(
-            *[
-                _merge_nodes_then_upsert(k, v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
-                for k, v in maybe_nodes.items()
-            ]
-        )
+        # Create batch for all operations
+        batch = DocumentGraphBatch()
+        all_entities_data = []
 
-        # Merge and upsert edges
-        await asyncio.gather(
-            *[
-                _merge_edges_then_upsert(k[0], k[1], v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
-                for k, v in maybe_edges.items()
-            ]
-        )
+        # Merge nodes and add to batch (no DB calls)
+        for entity_name, nodes_data in maybe_nodes.items():
+            merged_name, merged_data = await _merge_nodes_for_batch(
+                entity_name, nodes_data, knwoledge_graph_inst, global_config, tokenizer_wrapper
+            )
+            batch.add_node(merged_name, merged_data)
+            entity_data = merged_data.copy()
+            entity_data["entity_name"] = entity_name
+            all_entities_data.append(entity_data)
+
+        # Merge edges and add to batch (no DB calls)
+        for (src_id, tgt_id), edges_data in maybe_edges.items():
+            await _merge_edges_for_batch(
+                src_id, tgt_id, edges_data, knwoledge_graph_inst, global_config, tokenizer_wrapper, batch
+            )
+
+        # Execute batch in single transaction
+        if batch.nodes or batch.edges:
+            await knwoledge_graph_inst.execute_document_batch(batch)
 
         if not len(all_entities_data):
             logger.warning("Didn't extract any entities, maybe your LLM is not working")
@@ -352,81 +361,74 @@ class GraphRAG:
             string_or_strings = [string_or_strings]
             logger.info(f"[INSERT] Processing single document")
         else:
-            logger.info(f"[INSERT] Processing {len(string_or_strings)} documents")
-
-        # Create semaphore to limit parallelism based on LLM max concurrent
-        max_parallel = self.config.llm.max_concurrent
-        logger.info(f"[INSERT] Using parallel processing with max_concurrent={max_parallel}")
-        semaphore = asyncio.Semaphore(max_parallel)
+            logger.info(f"[INSERT] Processing {len(string_or_strings)} documents sequentially")
 
         async def process_single_document(doc_string: str, doc_idx: int):
-            """Process a single document - can run in parallel."""
-            async with semaphore:
-                doc_id = compute_mdhash_id(doc_string, prefix="doc-")
-                logger.info(f"[INSERT] Document {doc_idx+1}: {doc_id} ({len(doc_string)} chars) - started")
+            """Process a single document sequentially to avoid deadlocks."""
+            doc_id = compute_mdhash_id(doc_string, prefix="doc-")
+            logger.info(f"[INSERT] Document {doc_idx+1}: {doc_id} ({len(doc_string)} chars) - started")
 
-                # Store full document
-                await self.full_docs.upsert({doc_id: {"content": doc_string}})
+            # Store full document
+            await self.full_docs.upsert({doc_id: {"content": doc_string}})
 
-                # Chunk the document
-                chunks = await get_chunks_v2(
-                    doc_string,
-                    self.tokenizer_wrapper,
-                    self.chunk_func,
-                    self.config.chunking.size,
-                    self.config.chunking.overlap
-                )
-                logger.info(f"[INSERT] Document {doc_idx+1}: Created {len(chunks)} chunks")
+            # Chunk the document
+            chunks = await get_chunks_v2(
+                doc_string,
+                self.tokenizer_wrapper,
+                self.chunk_func,
+                self.config.chunking.size,
+                self.config.chunking.overlap
+            )
+            logger.info(f"[INSERT] Document {doc_idx+1}: Created {len(chunks)} chunks")
 
-                # Store chunks
-                for chunk_idx, chunk in enumerate(chunks):
+            # Store chunks
+            for chunk_idx, chunk in enumerate(chunks):
+                # Include doc_id in hash to prevent cross-document chunk collisions
+                chunk_id_content = f"{doc_id}::{chunk['content']}"
+                chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
+                chunk["doc_id"] = doc_id
+                await self.text_chunks.upsert({chunk_id: chunk})
+
+            # Extract entities if local query is enabled
+            if self.config.query.enable_local:
+                extraction_start = time.time()
+                chunk_map = {}
+                for chunk in chunks:
                     # Include doc_id in hash to prevent cross-document chunk collisions
                     chunk_id_content = f"{doc_id}::{chunk['content']}"
                     chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
-                    chunk["doc_id"] = doc_id
-                    await self.text_chunks.upsert({chunk_id: chunk})
+                    chunk_map[chunk_id] = chunk
 
-                # Extract entities if local query is enabled
-                if self.config.query.enable_local:
-                    extraction_start = time.time()
-                    chunk_map = {}
-                    for chunk in chunks:
-                        # Include doc_id in hash to prevent cross-document chunk collisions
-                        chunk_id_content = f"{doc_id}::{chunk['content']}"
-                        chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
-                        chunk_map[chunk_id] = chunk
+                await self.entity_extraction_func(
+                    chunk_map,
+                    self.chunk_entity_relation_graph,
+                    self.entities_vdb,
+                    self.tokenizer_wrapper,
+                    self._global_config(),
+                    using_amazon_bedrock=False
+                )
+                extraction_time = time.time() - extraction_start
+                logger.info(f"[INSERT] Document {doc_idx+1}: Entity extraction complete in {extraction_time:.2f}s")
 
-                    await self.entity_extraction_func(
-                        chunk_map,
-                        self.chunk_entity_relation_graph,
-                        self.entities_vdb,
-                        self.tokenizer_wrapper,
-                        self._global_config(),
-                        using_amazon_bedrock=False
-                    )
-                    extraction_time = time.time() - extraction_start
-                    logger.info(f"[INSERT] Document {doc_idx+1}: Entity extraction complete in {extraction_time:.2f}s")
+            # Store chunks in vector DB if naive RAG is enabled
+            if self.config.query.enable_naive_rag and self.chunks_vdb:
+                chunk_dict = {}
+                for chunk in chunks:
+                    # Include doc_id in hash to prevent cross-document chunk collisions
+                    chunk_id_content = f"{doc_id}::{chunk['content']}"
+                    chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
+                    chunk_dict[chunk_id] = {
+                        "content": chunk["content"],
+                        "doc_id": doc_id,
+                    }
+                await self.chunks_vdb.upsert(chunk_dict)
 
-                # Store chunks in vector DB if naive RAG is enabled
-                if self.config.query.enable_naive_rag and self.chunks_vdb:
-                    chunk_dict = {}
-                    for chunk in chunks:
-                        # Include doc_id in hash to prevent cross-document chunk collisions
-                        chunk_id_content = f"{doc_id}::{chunk['content']}"
-                        chunk_id = compute_mdhash_id(chunk_id_content, prefix="chunk-")
-                        chunk_dict[chunk_id] = {
-                            "content": chunk["content"],
-                            "doc_id": doc_id,
-                        }
-                    await self.chunks_vdb.upsert(chunk_dict)
+            logger.info(f"[INSERT] Document {doc_idx+1}: {doc_id} - completed")
 
-                logger.info(f"[INSERT] Document {doc_idx+1}: {doc_id} - completed")
-
-        # Process all documents in parallel (limited by semaphore)
-        await asyncio.gather(*[
-            process_single_document(doc_string, doc_idx)
-            for doc_idx, doc_string in enumerate(string_or_strings)
-        ])
+        # Process all documents sequentially to avoid Neo4j deadlocks
+        # When documents share entities, parallel processing causes lock contention
+        for doc_idx, doc_string in enumerate(string_or_strings):
+            await process_single_document(doc_string, doc_idx)
 
         logger.info(f"[INSERT] All documents processed, starting clustering...")
 
@@ -477,6 +479,8 @@ class GraphRAG:
             schema = await self.chunk_entity_relation_graph.community_schema()
             all_node_ids = sorted({node_id for comm in schema.values() for node_id in comm.get("nodes", [])})
 
+            logger.info(f"[POINT-TRACK] Community generation complete, preparing to update {len(all_node_ids)} entities in vector DB")
+
             use_payload_update = (
                 hasattr(self.entities_vdb, 'update_payload') and
                 (self.config.storage.hybrid_search.enabled
@@ -484,15 +488,24 @@ class GraphRAG:
                  else self.global_config.get("enable_hybrid_search", False))
             )
 
+            logger.info(f"[POINT-TRACK] Vector DB update mode: {'PAYLOAD_ONLY (preserving embeddings)' if use_payload_update else 'FULL_UPSERT (re-embedding)'}")
+
             if use_payload_update:
-                # Payload-only update to preserve embeddings
                 from nano_graphrag._utils import compute_mdhash_id
                 updates = {}
+                skipped_no_vector = 0
+
                 for node_id in all_node_ids:
                     try:
                         node_data = await self.chunk_entity_relation_graph.get_node(node_id)
                         if not node_data:
                             continue
+
+                        if not node_data.get("has_vector", False):
+                            skipped_no_vector += 1
+                            logger.debug(f"[POINT-TRACK] Skipping {node_id} - has_vector=False")
+                            continue
+
                         description = (node_data.get("description", "") or "").strip()
                         if not description:
                             entity_name = (node_data.get("name") or node_id).strip()
@@ -510,9 +523,15 @@ class GraphRAG:
                     except Exception as e:
                         logger.debug(f"Could not update {node_id}: {e}")
 
+                logger.info(f"[POINT-TRACK] Community metrics: total={len(all_node_ids)}, will_update={len(updates)}, skipped_no_vector={skipped_no_vector}")
+
                 if updates:
                     logger.info(f"[COMMUNITY] Updating {len(updates)} entity payloads (preserving vectors)")
+                    logger.info(f"[POINT-TRACK] Calling update_payload for {len(updates)} entities, entity_ids={list(updates.keys())[:5]}{'...' if len(updates) > 5 else ''}")
                     await self.entities_vdb.update_payload(updates)
+                    logger.info(f"[POINT-TRACK] update_payload completed successfully")
+                else:
+                    logger.warning(f"[POINT-TRACK] No updates generated for payload-only path!")
             else:
                 # Fallback: full re-embedding path (recreates vectors, used when hybrid disabled)
                 from nano_graphrag._utils import compute_mdhash_id
@@ -571,15 +590,16 @@ class GraphRAG:
         if param.mode == "naive" and not self.config.query.enable_naive_rag:
             raise ValueError("Naive RAG mode is disabled in config")
 
-        # Use config value for local_max_token_for_text_unit
-        param.local_max_token_for_text_unit = self.config.query.local_max_token_for_text_unit
-        
+        # Auto-scale token budgets for local queries based on LLM context window
+        if param.mode == "local":
+            param.scale_budgets_for_model(self.config.llm.max_tokens)
+
         # Override response_format for LMStudio (it doesn't support json_object format)
         import os
         if os.getenv("LLM_BASE_URL") and param.mode == "global":
             # Clear the response_format for LMStudio
             param.global_special_community_map_llm_kwargs = {}
-        
+
         # Get complete global config
         cfg = self._global_config()
         
@@ -629,10 +649,6 @@ class GraphRAG:
             await self.community_reports.index_done_callback()
         if self.llm_response_cache and hasattr(self.llm_response_cache, 'index_done_callback'):
             await self.llm_response_cache.index_done_callback()
-        
-        # Flush graph storage
-        if hasattr(self.chunk_entity_relation_graph, 'index_done_callback'):
-            await self.chunk_entity_relation_graph.index_done_callback()
         
         # Flush vector storage
         if self.entities_vdb and hasattr(self.entities_vdb, 'index_done_callback'):

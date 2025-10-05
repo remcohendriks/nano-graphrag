@@ -207,9 +207,9 @@ async def _find_most_related_edges_from_entities(
     )
     all_edges_data = truncate_list_by_token_size(
         all_edges_data,
-        key=lambda x: x["description"],
-        max_token_size=query_param.local_max_token_for_local_context,
-        tokenizer_wrapper=tokenizer_wrapper, 
+        key=lambda x: f"{x['src_tgt'][0]}|{x['src_tgt'][1]}|{x['description']}",
+        max_token_size=query_param.local_max_token_for_relationships,
+        tokenizer_wrapper=tokenizer_wrapper,
     )
     return all_edges_data
 

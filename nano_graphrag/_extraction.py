@@ -4,6 +4,7 @@ import re
 import asyncio
 from typing import Union, Dict, List, Optional, Any, Tuple
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from ._utils import (
     logger,
     compute_mdhash_id,
@@ -23,6 +24,33 @@ from .schemas import NodeData, EdgeData, ExtractionRecord, RelationshipRecord
 import os
 import json
 import time
+
+
+@dataclass
+class DocumentGraphBatch:
+    """Accumulator for document graph operations to execute in single transaction."""
+    nodes: List[Tuple[str, Dict[str, Any]]] = field(default_factory=list)
+    edges: List[Tuple[str, str, Dict[str, Any]]] = field(default_factory=list)
+
+    def add_node(self, node_id: str, node_data: Dict[str, Any]) -> None:
+        """Add a node to the batch."""
+        self.nodes.append((node_id, node_data))
+
+    def add_edge(self, source_id: str, target_id: str, edge_data: Dict[str, Any]) -> None:
+        """Add an edge to the batch."""
+        self.edges.append((source_id, target_id, edge_data))
+
+    def chunk(self, max_size: int = 10) -> List['DocumentGraphBatch']:
+        """Split batch into smaller chunks."""
+        chunks = []
+
+        for i in range(0, max(len(self.nodes), len(self.edges)), max_size):
+            chunk = DocumentGraphBatch()
+            chunk.nodes = self.nodes[i:i + max_size]
+            chunk.edges = self.edges[i:i + max_size]
+            chunks.append(chunk)
+
+        return chunks if chunks else [DocumentGraphBatch()]
 
 
 def get_relation_patterns() -> Dict[str, str]:
@@ -93,24 +121,27 @@ async def _handle_entity_relation_summary(
     return summary
 
 
-async def _merge_nodes_then_upsert(
+async def _merge_nodes_for_batch(
     entity_name: str,
     nodes_data: List[Dict[str, Any]],
-    knwoledge_graph_inst: BaseGraphStorage,
+    graph_storage: BaseGraphStorage,
     global_config: Dict[str, Any],
     tokenizer_wrapper: TokenizerWrapper,
-) -> Dict[str, Any]:
+) -> Tuple[str, Dict[str, Any]]:
+    """Merge node data for batch processing, returns (entity_name, merged_data)."""
     already_entitiy_types = []
     already_source_ids = []
     already_description = []
+    existing_has_vector = False
 
-    already_node = await knwoledge_graph_inst.get_node(entity_name)
+    already_node = await graph_storage.get_node(entity_name)
     if already_node is not None:
         already_entitiy_types.append(already_node["entity_type"])
         already_source_ids.extend(
             split_string_by_multi_markers(already_node["source_id"], [GRAPH_FIELD_SEP])
         )
         already_description.append(already_node["description"])
+        existing_has_vector = already_node.get("has_vector", False)
 
     entity_type = sorted(
         Counter(
@@ -132,8 +163,22 @@ async def _merge_nodes_then_upsert(
         entity_type=entity_type,
         description=description,
         source_id=source_id,
+        has_vector=existing_has_vector,
     )
-    await knwoledge_graph_inst.upsert_node(
+    return entity_name, node_data
+
+
+async def _merge_nodes_then_upsert(
+    entity_name: str,
+    nodes_data: List[Dict[str, Any]],
+    graph_storage: BaseGraphStorage,
+    global_config: Dict[str, Any],
+    tokenizer_wrapper: TokenizerWrapper,
+) -> Dict[str, Any]:
+    entity_name, node_data = await _merge_nodes_for_batch(
+        entity_name, nodes_data, graph_storage, global_config, tokenizer_wrapper
+    )
+    await graph_storage.upsert_node(
         entity_name,
         node_data=node_data,
     )
@@ -141,20 +186,22 @@ async def _merge_nodes_then_upsert(
     return node_data
 
 
-async def _merge_edges_then_upsert(
+async def _merge_edges_for_batch(
     src_id: str,
     tgt_id: str,
     edges_data: List[Dict[str, Any]],
-    knwoledge_graph_inst: BaseGraphStorage,
+    graph_storage: BaseGraphStorage,
     global_config: Dict[str, Any],
     tokenizer_wrapper: TokenizerWrapper,
+    batch: DocumentGraphBatch,
 ) -> None:
+    """Merge edge data and add to batch, including missing nodes."""
     already_weights = []
     already_source_ids = []
     already_description = []
     already_order = []
-    if await knwoledge_graph_inst.has_edge(src_id, tgt_id):
-        already_edge = await knwoledge_graph_inst.get_edge(src_id, tgt_id)
+    if await graph_storage.has_edge(src_id, tgt_id):
+        already_edge = await graph_storage.get_edge(src_id, tgt_id)
         already_weights.append(already_edge["weight"])
         already_source_ids.extend(
             split_string_by_multi_markers(already_edge["source_id"], [GRAPH_FIELD_SEP])
@@ -171,16 +218,20 @@ async def _merge_edges_then_upsert(
     source_id = GRAPH_FIELD_SEP.join(
         set([dp["source_id"] for dp in edges_data] + already_source_ids)
     )
+
+    # Add missing nodes to batch
     for need_insert_id in [src_id, tgt_id]:
-        if not (await knwoledge_graph_inst.has_node(need_insert_id)):
-            await knwoledge_graph_inst.upsert_node(
+        if not (await graph_storage.has_node(need_insert_id)):
+            batch.add_node(
                 need_insert_id,
-                node_data={
+                {
                     "source_id": source_id,
                     "description": description,
                     "entity_type": "UNKNOWN",
-                },
+                    "has_vector": False,
+                }
             )
+
     description = await _handle_entity_relation_summary(
         (src_id, tgt_id), description, global_config, tokenizer_wrapper
     )
@@ -198,16 +249,32 @@ async def _merge_edges_then_upsert(
     if relation_type is not None:
         edge_data["relation_type"] = relation_type
 
-    await knwoledge_graph_inst.upsert_edge(
-        src_id,
-        tgt_id,
-        edge_data=edge_data,
+    batch.add_edge(src_id, tgt_id, edge_data)
+
+
+async def _merge_edges_then_upsert(
+    src_id: str,
+    tgt_id: str,
+    edges_data: List[Dict[str, Any]],
+    graph_storage: BaseGraphStorage,
+    global_config: Dict[str, Any],
+    tokenizer_wrapper: TokenizerWrapper,
+) -> None:
+    batch = DocumentGraphBatch()
+    await _merge_edges_for_batch(
+        src_id, tgt_id, edges_data, graph_storage, global_config, tokenizer_wrapper, batch
     )
+    # Process nodes first
+    for node_id, node_data in batch.nodes:
+        await graph_storage.upsert_node(node_id, node_data=node_data)
+    # Then edges
+    for src, tgt, edge_data in batch.edges:
+        await graph_storage.upsert_edge(src, tgt, edge_data=edge_data)
 
 
 async def extract_entities(
     chunks: Dict[str, TextChunkSchema],
-    knwoledge_graph_inst: BaseGraphStorage,
+    graph_storage: BaseGraphStorage,
     entity_vdb: BaseVectorStorage,
     tokenizer_wrapper: TokenizerWrapper,
     global_config: Dict[str, Any],
@@ -355,27 +422,44 @@ async def extract_entities(
             description = edge_data.get("description", "")
             edge_data["relation_type"] = map_relation_type(description, relation_patterns)
 
-    logger.info(f"[EXTRACT] Merging and upserting {len(maybe_nodes)} entities...")
-    entity_start = time.time()
-    all_entities_data = await asyncio.gather(
-        *[
-            _merge_nodes_then_upsert(k, v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
-            for k, v in maybe_nodes.items()
-        ]
-    )
-    entity_time = time.time() - entity_start
-    logger.info(f"[EXTRACT] Entity upsert completed in {entity_time:.2f}s")
+    # Create batch accumulator
+    batch = DocumentGraphBatch()
+    all_entities_data = []
 
-    logger.info(f"[EXTRACT] Merging and upserting {len(maybe_edges)} relationships...")
+    logger.info(f"[EXTRACT] Processing {len(maybe_nodes)} entities for batch...")
+    entity_start = time.time()
+
+    # Process nodes sequentially into batch
+    for entity_name, nodes_data in maybe_nodes.items():
+        merged_name, merged_data = await _merge_nodes_for_batch(
+            entity_name, nodes_data, graph_storage, global_config, tokenizer_wrapper
+        )
+        batch.add_node(merged_name, merged_data)
+        entity_data = merged_data.copy()
+        entity_data["entity_name"] = entity_name
+        all_entities_data.append(entity_data)
+
+    entity_time = time.time() - entity_start
+    logger.info(f"[EXTRACT] Entity processing completed in {entity_time:.2f}s")
+
+    logger.info(f"[EXTRACT] Processing {len(maybe_edges)} relationships for batch...")
     edge_start = time.time()
-    await asyncio.gather(
-        *[
-            _merge_edges_then_upsert(k[0], k[1], v, knwoledge_graph_inst, global_config, tokenizer_wrapper)
-            for k, v in maybe_edges.items()
-        ]
-    )
+
+    # Process edges sequentially into batch
+    for (src_id, tgt_id), edges_data in maybe_edges.items():
+        await _merge_edges_for_batch(
+            src_id, tgt_id, edges_data, graph_storage, global_config, tokenizer_wrapper, batch
+        )
+
     edge_time = time.time() - edge_start
-    logger.info(f"[EXTRACT] Relationship upsert completed in {edge_time:.2f}s")
+    logger.info(f"[EXTRACT] Relationship processing completed in {edge_time:.2f}s")
+
+    # Execute batch in single transaction
+    logger.info(f"[EXTRACT] Executing batch transaction with {len(batch.nodes)} nodes and {len(batch.edges)} edges...")
+    batch_start = time.time()
+    await graph_storage.execute_document_batch(batch)
+    batch_time = time.time() - batch_start
+    logger.info(f"[EXTRACT] Batch transaction completed in {batch_time:.2f}s")
     if not len(all_entities_data):
         logger.warning("[EXTRACT] WARNING: No entities extracted - check LLM configuration")
         total_time = time.time() - start_time
@@ -385,20 +469,35 @@ async def extract_entities(
         logger.info(f"[EXTRACT] Updating entity vector DB with {len(all_entities_data)} entities...")
         vdb_start = time.time()
         data_for_vdb = {}
+        logger.info(f"[POINT-TRACK] Starting entity ID generation for {len(all_entities_data)} entities")
         for dp in all_entities_data:
             entity_name_clean = dp["entity_name"].strip('"').strip("'")
             entity_id = compute_mdhash_id(entity_name_clean, prefix="ent-")
+            logger.debug(f"[POINT-TRACK] Entity '{entity_name_clean}' → entity_id={entity_id}")
             data_for_vdb[entity_id] = {
                 "content": f"{entity_name_clean} {dp['description']}",
                 "entity_name": entity_name_clean,
             }
-        await entity_vdb.upsert(data_for_vdb)
+
+        logger.info(f"[POINT-TRACK] Generated {len(data_for_vdb)} entity IDs, calling entity_vdb.upsert()")
+        try:
+            await entity_vdb.upsert(data_for_vdb)
+            logger.info(f"[POINT-TRACK] entity_vdb.upsert() completed successfully for {len(data_for_vdb)} entities")
+
+            entity_names = [dp["entity_name"].strip('"').strip("'") for dp in all_entities_data]
+            await graph_storage.batch_update_node_field(entity_names, "has_vector", True)
+            logger.info(f"[POINT-TRACK] Updated has_vector=True for {len(entity_names)} entities in Neo4j")
+        except Exception as e:
+            logger.error(f"[POINT-TRACK] CRITICAL: entity_vdb.upsert() failed: {type(e).__name__}: {e}")
+            logger.error(f"[POINT-TRACK] Entity IDs that failed to upsert: {list(data_for_vdb.keys())}")
+            raise
+
         vdb_time = time.time() - vdb_start
         logger.info(f"[EXTRACT] Vector DB updated in {vdb_time:.2f}s")
 
     total_time = time.time() - start_time
     logger.info(f"[EXTRACT] Total extraction time: {total_time:.2f}s (entities: {len(all_entities_data)}, edges: {len(maybe_edges)})")
-    return knwoledge_graph_inst
+    return graph_storage
 
 
 async def extract_entities_from_chunks(

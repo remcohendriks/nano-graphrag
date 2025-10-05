@@ -267,6 +267,8 @@ class TestEnhancedCommunityReports:
 
             mock_graph.get_node = AsyncMock(return_value={})
             mock_graph.get_edge = AsyncMock(return_value={})
+            mock_graph.get_nodes_batch = AsyncMock(return_value=[])
+            mock_graph.get_edges_batch = AsyncMock(return_value=[])
             mock_graph.node_degrees_batch = AsyncMock(return_value=[])
             mock_graph.edge_degrees_batch = AsyncMock(return_value=[])
 
@@ -309,9 +311,18 @@ class TestEnhancedCommunityReports:
                 {"entity_type": "EXECUTIVE_ORDER", "description": "Previous order"},
                 {"entity_type": "STATUTE", "description": "Cybersecurity act"}
             ])
+            mock_graph.get_nodes_batch = AsyncMock(return_value=[
+                {"entity_type": "EXECUTIVE_ORDER", "description": "New cybersecurity order"},
+                {"entity_type": "EXECUTIVE_ORDER", "description": "Previous order"},
+                {"entity_type": "STATUTE", "description": "Cybersecurity act"}
+            ])
 
             # Mock edge data with relation types
             mock_graph.get_edge = AsyncMock(side_effect=[
+                {"description": "supersedes", "relation_type": "SUPERSEDES", "weight": 1.0},
+                {"description": "implements", "relation_type": "IMPLEMENTS", "weight": 0.9}
+            ])
+            mock_graph.get_edges_batch = AsyncMock(return_value=[
                 {"description": "supersedes", "relation_type": "SUPERSEDES", "weight": 1.0},
                 {"description": "implements", "relation_type": "IMPLEMENTS", "weight": 0.9}
             ])

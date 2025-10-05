@@ -16,6 +16,9 @@ class LLMConfig:
     cache_enabled: bool = True
     temperature: float = 0.0
     request_timeout: float = 30.0
+    community_report_token_budget_ratio: float = 0.75
+    community_report_chat_overhead: int = 1000
+    community_report_max_concurrency: int = 8
     
     @classmethod
     def from_env(cls) -> 'LLMConfig':
@@ -27,7 +30,10 @@ class LLMConfig:
             max_concurrent=int(os.getenv("LLM_MAX_CONCURRENT", "8")),
             cache_enabled=os.getenv("LLM_CACHE_ENABLED", "true").lower() == "true",
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.0")),
-            request_timeout=float(os.getenv("LLM_REQUEST_TIMEOUT", "30.0"))
+            request_timeout=float(os.getenv("LLM_REQUEST_TIMEOUT", "30.0")),
+            community_report_token_budget_ratio=float(os.getenv("COMMUNITY_REPORT_TOKEN_BUDGET_RATIO", "0.75")),
+            community_report_chat_overhead=int(os.getenv("COMMUNITY_REPORT_CHAT_OVERHEAD", "1000")),
+            community_report_max_concurrency=int(os.getenv("COMMUNITY_REPORT_MAX_CONCURRENCY", "8"))
         )
     
     def __post_init__(self):
@@ -406,6 +412,8 @@ class GraphRAGConfig:
             'best_model_max_token_size': self.llm.max_tokens,
             'best_model_max_async': self.llm.max_concurrent,
             'enable_llm_cache': self.llm.cache_enabled,
+            'community_report_token_budget_ratio': self.llm.community_report_token_budget_ratio,
+            'community_report_chat_overhead': self.llm.community_report_chat_overhead,
         }
         
         # Add storage-specific configuration
@@ -502,6 +510,9 @@ class GraphRAGConfig:
             'always_create_working_dir': True,
             'addon_params': {},
             'hybrid_search': self.storage.hybrid_search,
+            'community_report_token_budget_ratio': self.llm.community_report_token_budget_ratio,
+            'community_report_chat_overhead': self.llm.community_report_chat_overhead,
+            'community_report_max_concurrency': self.llm.community_report_max_concurrency,
         }
 
         # Add HNSW-specific parameters if using hnswlib backend
