@@ -16,7 +16,7 @@ const Tabs = {
         // Handle URL hash for deep linking
         if (window.location.hash) {
             const tab = window.location.hash.substring(1);
-            if (['documents', 'search', 'jobs'].includes(tab)) {
+            if (['documents', 'search', 'jobs', 'backups'].includes(tab)) {
                 this.switchTab(tab);
             }
         }
@@ -24,7 +24,7 @@ const Tabs = {
         // Listen for hash changes
         window.addEventListener('hashchange', () => {
             const tab = window.location.hash.substring(1);
-            if (['documents', 'search', 'jobs'].includes(tab)) {
+            if (['documents', 'search', 'jobs', 'backups'].includes(tab)) {
                 this.switchTab(tab);
             }
         });
@@ -79,6 +79,11 @@ const Tabs = {
             case 'jobs':
                 if (window.Jobs) {
                     window.Jobs.onTabActivated();
+                }
+                break;
+            case 'backups':
+                if (window.Backups) {
+                    window.Backups.onTabActivated();
                 }
                 break;
         }
