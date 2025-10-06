@@ -13,8 +13,7 @@ from .models import BackupManifest, BackupMetadata
 from .utils import (
     create_archive,
     extract_archive,
-    compute_checksum,
-    verify_checksum,
+    compute_directory_checksum,
     generate_backup_id,
     save_manifest,
     load_manifest,
@@ -75,35 +74,29 @@ class BackupManager:
             with open(config_path, "w") as f:
                 json.dump(asdict(self.graphrag.config), f, indent=2)
 
-            # Create manifest WITHOUT checksum (will compute after archive)
+            # Compute checksum of payload directory (before archiving)
+            # This avoids the self-reference paradox of including archive checksum in manifest
+            checksum = compute_directory_checksum(temp_dir)
+
+            # Create manifest with payload checksum
             manifest = BackupManifest(
                 backup_id=backup_id,
                 created_at=datetime.now(timezone.utc),
                 nano_graphrag_version=self._get_version(),
                 storage_backends=self._get_backend_types(),
                 statistics=statistics,
-                checksum=""  # Placeholder, computed after archive
+                checksum=checksum  # Checksum of directory contents, not archive
             )
 
             # Save manifest to temp directory
             manifest_path = temp_dir / "manifest.json"
             await save_manifest(manifest.model_dump(), manifest_path)
 
-            # Create initial archive
+            # Create archive (single pass, manifest already has checksum)
             archive_path = self.backup_dir / f"{backup_id}.ngbak"
-            await create_archive(temp_dir, archive_path)
-
-            # Compute checksum
-            checksum = compute_checksum(archive_path)
-
-            # Update manifest with checksum
-            manifest.checksum = checksum
-            await save_manifest(manifest.model_dump(), manifest_path)
-
-            # Recreate archive with updated manifest
             archive_size = await create_archive(temp_dir, archive_path)
 
-            # Save checksum alongside archive
+            # Save checksum alongside archive for convenience
             checksum_path = self.backup_dir / f"{backup_id}.checksum"
             with open(checksum_path, "w") as f:
                 f.write(checksum)
@@ -150,8 +143,13 @@ class BackupManager:
             manifest_data = await load_manifest(manifest_path)
             manifest = BackupManifest(**manifest_data)
 
-            # Verify checksum (optional, for data integrity)
-            logger.debug(f"Backup checksum: {manifest.checksum}")
+            # Verify payload checksum for data integrity
+            if manifest.checksum:
+                computed_checksum = compute_directory_checksum(temp_dir)
+                if computed_checksum == manifest.checksum:
+                    logger.info(f"Payload checksum verified: {manifest.checksum}")
+                else:
+                    logger.warning(f"Checksum mismatch! Expected: {manifest.checksum}, Got: {computed_checksum}")
 
             # Restore backends
             await self._restore_graph(temp_dir)
@@ -179,13 +177,6 @@ class BackupManager:
                 backup_id = archive_path.stem
                 checksum_path = self.backup_dir / f"{backup_id}.checksum"
 
-                if checksum_path.exists():
-                    with open(checksum_path, "r") as f:
-                        stored_checksum = f.read().strip()
-                else:
-                    # Fallback: compute checksum if file missing
-                    stored_checksum = compute_checksum(archive_path)
-
                 temp_dir = self.backup_dir / f"read_{backup_id}"
                 temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -196,8 +187,14 @@ class BackupManager:
                     manifest_data = await load_manifest(manifest_path)
                     manifest = BackupManifest(**manifest_data)
 
-                    # Update manifest with actual checksum from file
-                    manifest.checksum = stored_checksum
+                    # Verify payload checksum if external checksum file exists
+                    if checksum_path.exists():
+                        with open(checksum_path, "r") as f:
+                            stored_checksum = f.read().strip()
+
+                        # Manifest checksum should match (it's payload checksum)
+                        if manifest.checksum != stored_checksum:
+                            logger.warning(f"Checksum mismatch for {backup_id}: manifest={manifest.checksum}, file={stored_checksum}")
 
                     backups.append(BackupMetadata(
                         backup_id=manifest.backup_id,

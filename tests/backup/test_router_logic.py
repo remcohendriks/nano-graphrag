@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
+from dataclasses import dataclass
 
 from nano_graphrag.backup.models import BackupMetadata
 from nano_graphrag.backup.manager import BackupManager
@@ -22,8 +23,12 @@ async def test_backup_manager_create_backup_workflow():
         mock_graphrag.text_chunks = MagicMock()
         mock_graphrag.community_reports = MagicMock()
         mock_graphrag.llm_response_cache = MagicMock()
-        mock_graphrag.config = MagicMock()
-        mock_graphrag.config.model_dump_json.return_value = '{"test": "config"}'
+
+        @dataclass
+        class MockConfig:
+            test: str = "config"
+
+        mock_graphrag.config = MockConfig()
 
         # Mock exporters
         with patch('nano_graphrag.backup.manager.Neo4jExporter') as mock_neo4j:
@@ -56,7 +61,7 @@ async def test_backup_manager_create_backup_workflow():
                         return len("fake archive data")
 
                     with patch('nano_graphrag.backup.manager.create_archive', new=mock_create_archive):
-                        with patch('nano_graphrag.backup.manager.compute_checksum', return_value="sha256:test123"):
+                        with patch('nano_graphrag.backup.manager.compute_directory_checksum', return_value="sha256:test123"):
                             manager = BackupManager(mock_graphrag, tmpdir)
 
                             # This is what the API endpoint does

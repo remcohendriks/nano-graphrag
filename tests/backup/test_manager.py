@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
+from dataclasses import dataclass
 
 from nano_graphrag.backup.manager import BackupManager
 from nano_graphrag.backup.models import BackupManifest
@@ -29,9 +30,12 @@ class MockGraphRAG:
         self.community_reports = MockStorage("json")
         self.llm_response_cache = MockStorage("json")
 
-        # Add config
-        self.config = MagicMock()
-        self.config.model_dump_json.return_value = '{"test": "config"}'
+        # Add config as a simple object that can be serialized
+        @dataclass
+        class MockConfig:
+            test: str = "config"
+
+        self.config = MockConfig()
 
 
 @pytest.fixture
@@ -102,7 +106,7 @@ async def test_create_backup(
         return 1024
 
     with patch('nano_graphrag.backup.manager.create_archive', new=mock_create_archive):
-        with patch('nano_graphrag.backup.manager.compute_checksum', return_value="sha256:test123"):
+        with patch('nano_graphrag.backup.manager.compute_directory_checksum', return_value="sha256:test123"):
             metadata = await manager.create_backup(backup_id="test_backup")
 
     # Verify metadata

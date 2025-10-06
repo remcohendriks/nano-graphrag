@@ -66,6 +66,38 @@ def compute_checksum(file_path: Path) -> str:
     return f"sha256:{sha256.hexdigest()}"
 
 
+def compute_directory_checksum(directory: Path) -> str:
+    """Compute SHA-256 checksum of directory contents.
+
+    Computes a deterministic checksum by hashing files in sorted order.
+    This enables including the checksum in the manifest without creating
+    a self-reference paradox.
+
+    Args:
+        directory: Directory to compute checksum for
+
+    Returns:
+        SHA-256 checksum as hex string with 'sha256:' prefix
+    """
+    sha256 = hashlib.sha256()
+
+    # Get all files in sorted order for deterministic hash
+    all_files = sorted(directory.rglob("*"))
+
+    for file_path in all_files:
+        if file_path.is_file():
+            # Hash relative path
+            relative_path = file_path.relative_to(directory)
+            sha256.update(str(relative_path).encode('utf-8'))
+
+            # Hash file contents
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha256.update(chunk)
+
+    return f"sha256:{sha256.hexdigest()}"
+
+
 def verify_checksum(file_path: Path, expected_checksum: str) -> bool:
     """Verify file checksum.
 

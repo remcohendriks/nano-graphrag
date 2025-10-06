@@ -13,7 +13,7 @@ class BackupManifest(BaseModel):
     nano_graphrag_version: str = Field(..., description="nano-graphrag version")
     storage_backends: Dict[str, str] = Field(..., description="Storage backend types")
     statistics: Dict[str, int] = Field(..., description="Data statistics")
-    checksum: str = Field(..., description="SHA-256 checksum of archive contents")
+    checksum: str = Field(..., description="SHA-256 checksum of payload directory contents (not archive file)")
 
 
 class BackupMetadata(BaseModel):
