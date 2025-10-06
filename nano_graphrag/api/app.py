@@ -11,7 +11,7 @@ from nano_graphrag import GraphRAG
 from nano_graphrag.config import GraphRAGConfig, StorageConfig
 import dataclasses
 from .config import settings
-from .routers import documents, query, health, management, jobs
+from .routers import documents, query, health, management, jobs, backup
 from .exceptions import StorageUnavailableError
 
 # Configure nano-graphrag logger with app-managed pattern
@@ -150,6 +150,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router, prefix=settings.api_prefix)
     app.include_router(documents.router, prefix=settings.api_prefix)
     app.include_router(query.router, prefix=settings.api_prefix)
+    app.include_router(backup.router, prefix=settings.api_prefix)
     app.include_router(health.router, prefix=settings.api_prefix)
     app.include_router(management.router, prefix=settings.api_prefix)
 
