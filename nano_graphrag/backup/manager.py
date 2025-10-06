@@ -74,25 +74,28 @@ class BackupManager:
             with open(config_path, "w") as f:
                 json.dump(asdict(self.graphrag.config), f, indent=2)
 
-            # Compute checksum of payload directory (before archiving)
-            # This avoids the self-reference paradox of including archive checksum in manifest
-            checksum = compute_directory_checksum(temp_dir)
-
-            # Create manifest with payload checksum
+            # Create manifest
             manifest = BackupManifest(
                 backup_id=backup_id,
                 created_at=datetime.now(timezone.utc),
                 nano_graphrag_version=self._get_version(),
                 storage_backends=self._get_backend_types(),
                 statistics=statistics,
-                checksum=checksum  # Checksum of directory contents, not archive
+                checksum=""  # Will be computed
             )
 
-            # Save manifest to temp directory
+            # Save manifest WITHOUT checksum field to temp directory
             manifest_path = temp_dir / "manifest.json"
+            await save_manifest(manifest.model_dump(exclude={"checksum"}), manifest_path)
+
+            # Compute checksum of payload directory (includes manifest without checksum field)
+            checksum = compute_directory_checksum(temp_dir)
+
+            # Update manifest object and save WITH checksum field
+            manifest.checksum = checksum
             await save_manifest(manifest.model_dump(), manifest_path)
 
-            # Create archive (single pass, manifest already has checksum)
+            # Create archive with finalized manifest
             archive_path = self.backup_dir / f"{backup_id}.ngbak"
             archive_size = await create_archive(temp_dir, archive_path)
 
@@ -145,11 +148,20 @@ class BackupManager:
 
             # Verify payload checksum for data integrity
             if manifest.checksum:
+                # Save manifest WITHOUT checksum field for verification
+                stored_checksum = manifest.checksum
+                await save_manifest(manifest.model_dump(exclude={"checksum"}), manifest_path)
+
+                # Compute checksum (same way as backup: manifest without checksum field)
                 computed_checksum = compute_directory_checksum(temp_dir)
-                if computed_checksum == manifest.checksum:
-                    logger.info(f"Payload checksum verified: {manifest.checksum}")
+
+                # Restore full manifest
+                await save_manifest(manifest.model_dump(), manifest_path)
+
+                if computed_checksum == stored_checksum:
+                    logger.info(f"Payload checksum verified: {stored_checksum}")
                 else:
-                    logger.warning(f"Checksum mismatch! Expected: {manifest.checksum}, Got: {computed_checksum}")
+                    logger.warning(f"Checksum mismatch! Expected: {stored_checksum}, Got: {computed_checksum}")
 
             # Restore backends
             await self._restore_graph(temp_dir)

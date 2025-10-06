@@ -177,3 +177,67 @@ async def test_get_backup_path(mock_graphrag, temp_backup_dir):
     # Get non-existent backup path
     path = await manager.get_backup_path("non_existent")
     assert path is None
+
+
+@pytest.mark.asyncio
+@patch('nano_graphrag.backup.manager.Neo4jExporter')
+@patch('nano_graphrag.backup.manager.QdrantExporter')
+@patch('nano_graphrag.backup.manager.KVExporter')
+async def test_checksum_includes_manifest(
+    mock_kv_exporter,
+    mock_qdrant_exporter,
+    mock_neo4j_exporter,
+    mock_graphrag,
+    temp_backup_dir
+):
+    """Regression test: Verify checksum includes manifest.json (CODEX-012).
+
+    This test ensures that:
+    1. The checksum is computed AFTER manifest.json is saved
+    2. Extracting and recomputing checksum matches the stored value
+    3. Prevents the timing bug where backup and restore checksums differ
+    """
+    # Setup mocks
+    neo4j_instance = mock_neo4j_exporter.return_value
+    neo4j_instance.export = AsyncMock(return_value=Path("/fake/neo4j.dump"))
+    neo4j_instance.get_statistics = AsyncMock(return_value={"entities": 10})
+
+    qdrant_instance = mock_qdrant_exporter.return_value
+    qdrant_instance.export = AsyncMock(return_value=Path("/fake/qdrant"))
+    qdrant_instance.get_statistics = AsyncMock(return_value={"vectors": 10})
+
+    kv_instance = mock_kv_exporter.return_value
+    kv_instance.export = AsyncMock(return_value=Path("/fake/kv"))
+    kv_instance.get_statistics = AsyncMock(return_value={"documents": 5})
+
+    manager = BackupManager(mock_graphrag, str(temp_backup_dir))
+
+    # Create real backup (no mocks for checksum computation)
+    metadata = await manager.create_backup(backup_id="checksum_test")
+
+    # Extract the archive
+    archive_path = temp_backup_dir / f"{metadata.backup_id}.ngbak"
+    extract_dir = temp_backup_dir / "extracted"
+
+    from nano_graphrag.backup.utils import extract_archive, load_manifest, save_manifest, compute_directory_checksum
+
+    await extract_archive(archive_path, extract_dir)
+
+    # Load manifest from extracted archive
+    manifest_path = extract_dir / "manifest.json"
+    manifest_data = await load_manifest(manifest_path)
+    stored_checksum = manifest_data["checksum"]
+
+    # Save manifest WITHOUT checksum field (same as backup process)
+    manifest_without_checksum = {k: v for k, v in manifest_data.items() if k != "checksum"}
+    await save_manifest(manifest_without_checksum, manifest_path)
+
+    # Compute checksum of extracted directory (manifest without checksum field)
+    computed_checksum = compute_directory_checksum(extract_dir)
+
+    # Restore full manifest
+    await save_manifest(manifest_data, manifest_path)
+
+    # CRITICAL: Checksums must match (manifest without checksum field included in hash)
+    assert computed_checksum == stored_checksum, \
+        f"Checksum mismatch! Stored: {stored_checksum}, Computed: {computed_checksum}"
