@@ -89,17 +89,21 @@ class BackupManager:
             manifest_path = temp_dir / "manifest.json"
             await save_manifest(manifest.model_dump(), manifest_path)
 
-            # Create final archive (single pass)
+            # Create initial archive
             archive_path = self.backup_dir / f"{backup_id}.ngbak"
-            archive_size = await create_archive(temp_dir, archive_path)
+            await create_archive(temp_dir, archive_path)
 
-            # Compute checksum of the FINAL archive
+            # Compute checksum
             checksum = compute_checksum(archive_path)
 
-            # Update manifest object (for return value)
+            # Update manifest with checksum
             manifest.checksum = checksum
+            await save_manifest(manifest.model_dump(), manifest_path)
 
-            # Save checksum alongside archive (for verification)
+            # Recreate archive with updated manifest
+            archive_size = await create_archive(temp_dir, archive_path)
+
+            # Save checksum alongside archive
             checksum_path = self.backup_dir / f"{backup_id}.checksum"
             with open(checksum_path, "w") as f:
                 f.write(checksum)

@@ -47,8 +47,13 @@ class QdrantExporter:
 
         snapshot_file = snapshot_dir / f"{self.collection_name}.snapshot"
 
+        headers = {}
+        api_key = getattr(self.storage, "_api_key", None)
+        if api_key:
+            headers["api-key"] = api_key
+
         async with httpx.AsyncClient() as http_client:
-            response = await http_client.get(download_url, timeout=300.0)
+            response = await http_client.get(download_url, headers=headers, timeout=300.0)
             response.raise_for_status()
 
             with open(snapshot_file, "wb") as f:
@@ -90,12 +95,18 @@ class QdrantExporter:
         qdrant_url = getattr(self.storage, "_url", "http://localhost:6333")
         upload_url = f"{qdrant_url}/collections/{self.collection_name}/snapshots/upload?priority=snapshot"
 
+        headers = {}
+        api_key = getattr(self.storage, "_api_key", None)
+        if api_key:
+            headers["api-key"] = api_key
+
         async with httpx.AsyncClient() as http_client:
             with open(snapshot_file, "rb") as f:
                 files = {"snapshot": (snapshot_file.name, f, "application/octet-stream")}
                 response = await http_client.post(
                     upload_url,
                     files=files,
+                    headers=headers,
                     timeout=300.0
                 )
                 response.raise_for_status()
