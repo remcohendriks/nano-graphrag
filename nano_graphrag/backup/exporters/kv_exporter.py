@@ -86,8 +86,9 @@ class KVExporter:
         """
         await storage._ensure_initialized()
 
-        # Get all keys with namespace prefix
         prefix = storage._prefix
+        logger.info(f"Exporting Redis storage: {namespace} with prefix: {prefix}")
+
         cursor = 0
         all_keys = []
 
@@ -99,29 +100,30 @@ class KVExporter:
             if cursor == 0:
                 break
 
-        # Get all values
+        logger.info(f"Found {len(all_keys)} keys in Redis for {namespace}")
+
+        if len(all_keys) > 0:
+            sample = all_keys[:3]
+            logger.debug(f"Sample keys: {[k.decode() if isinstance(k, bytes) else k for k in sample]}")
+
         all_data = {}
         for key in all_keys:
-            # Remove prefix to get original key
             original_key = key.decode() if isinstance(key, bytes) else key
             original_key = original_key.replace(prefix, "", 1)
 
             value = await storage._redis_client.get(key)
             if value:
-                # Decode bytes to string
                 value_str = value.decode() if isinstance(value, bytes) else value
                 try:
-                    # Try to parse as JSON
                     all_data[original_key] = json.loads(value_str)
                 except json.JSONDecodeError:
-                    # Store as string if not JSON
                     all_data[original_key] = value_str
 
         output_file = output_dir / f"{namespace}.json"
         with open(output_file, "w") as f:
             json.dump(all_data, f, indent=2, default=str)
 
-        logger.debug(f"Exported Redis storage: {namespace} ({len(all_data)} items)")
+        logger.info(f"Exported Redis storage: {namespace} ({len(all_data)} items) to {output_file}")
 
     async def restore(self, kv_dir: Path) -> None:
         """Restore all KV namespaces from JSON files.
@@ -178,23 +180,18 @@ class KVExporter:
             storage: RedisKVStorage instance
             data: Data dictionary to restore
         """
-        await storage._ensure_initialized()
+        logger.info(f"Restoring Redis storage for namespace: {storage.namespace}")
+        logger.info(f"Number of items to restore: {len(data)}")
 
-        # Restore all items
-        for key, value in data.items():
-            # Serialize value to JSON if it's not a string
-            if not isinstance(value, str):
-                value = json.dumps(value, default=str)
+        if len(data) > 0:
+            sample_keys = list(data.keys())[:3]
+            logger.debug(f"Sample keys: {sample_keys}")
+            for key in sample_keys:
+                value = data[key]
+                logger.debug(f"Key: {key}, Value type: {type(value)}, Value preview: {str(value)[:100]}")
 
-            # Use storage's prefix
-            full_key = f"{storage._prefix}{key}"
-
-            # Set value with appropriate TTL
-            ttl = storage._ttl_config.get(storage.namespace, 0)
-            if ttl > 0:
-                await storage._redis_client.setex(full_key, ttl, value)
-            else:
-                await storage._redis_client.set(full_key, value)
+        await storage.upsert(data)
+        logger.info(f"Redis restore completed for {storage.namespace}, upserted {len(data)} items")
 
     async def get_statistics(self) -> Dict[str, int]:
         """Get KV storage statistics.

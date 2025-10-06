@@ -15,6 +15,7 @@
             <button class="tab-button active" data-tab="documents">📄 Documents</button>
             <button class="tab-button" data-tab="search">🔍 Search</button>
             <button class="tab-button" data-tab="jobs">📊 Jobs</button>
+            <button class="tab-button" data-tab="backups">💾 Backups</button>
         </div>
 
         <!-- Tab Content -->
@@ -96,6 +97,47 @@
                     <tbody id="jobsBody"></tbody>
                 </table>
             </div>
+
+            <!-- Backups Tab -->
+            <div id="backups-tab" class="tab-panel">
+                <div class="backup-container">
+                    <h2>Backup & Restore</h2>
+
+                    <!-- Create Backup Section -->
+                    <div class="backup-section">
+                        <h3>Create Backup</h3>
+                        <button id="createBackupButton" class="action-button">Create New Backup</button>
+                        <div id="backupStatus" class="status-message"></div>
+                    </div>
+
+                    <!-- Restore Backup Section -->
+                    <div class="backup-section">
+                        <h3>Restore from File</h3>
+                        <input type="file" id="backupFileInput" accept=".ngbak" />
+                        <button id="restoreButton" class="action-button" disabled>Restore Backup</button>
+                        <div id="restoreStatus" class="status-message"></div>
+                    </div>
+
+                    <!-- Backups List Section -->
+                    <div class="backup-section">
+                        <h3>Available Backups</h3>
+                        <button id="refreshBackupsButton" class="refresh-button">Refresh</button>
+                        <div id="backupsListStatus"></div>
+                        <table id="backupsTable">
+                            <thead>
+                                <tr>
+                                    <th>Backup ID</th>
+                                    <th>Created</th>
+                                    <th>Size</th>
+                                    <th>Backends</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="backupsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -105,6 +147,7 @@
     <script src="/api/v1/static/js/documents.js"></script>
     <script src="/api/v1/static/js/search.js"></script>
     <script src="/api/v1/static/js/jobs.js"></script>
+    <script src="/api/v1/static/js/backups.js"></script>
     <script src="/api/v1/static/js/dashboard.js"></script>
 </body>
 </html>

@@ -67,40 +67,42 @@ class BackupManager:
                 **kv_stats
             }
 
-            # Create manifest
+            # Save GraphRAG config for reference
+            config_path = temp_dir / "config" / "graphrag_config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            import json
+            from dataclasses import asdict
+            with open(config_path, "w") as f:
+                json.dump(asdict(self.graphrag.config), f, indent=2)
+
+            # Create manifest WITHOUT checksum (will compute after archive)
             manifest = BackupManifest(
                 backup_id=backup_id,
                 created_at=datetime.now(timezone.utc),
                 nano_graphrag_version=self._get_version(),
                 storage_backends=self._get_backend_types(),
                 statistics=statistics,
-                checksum=""  # Will be computed after archive creation
+                checksum=""  # Placeholder, computed after archive
             )
 
-            # Save manifest
+            # Save manifest to temp directory
             manifest_path = temp_dir / "manifest.json"
             await save_manifest(manifest.model_dump(), manifest_path)
 
-            # Save GraphRAG config for reference
-            config_path = temp_dir / "config" / "graphrag_config.json"
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(config_path, "w") as f:
-                f.write(self.graphrag.config.model_dump_json(indent=2))
-
-            # Create archive
+            # Create final archive (single pass)
             archive_path = self.backup_dir / f"{backup_id}.ngbak"
             archive_size = await create_archive(temp_dir, archive_path)
 
-            # Compute checksum
+            # Compute checksum of the FINAL archive
             checksum = compute_checksum(archive_path)
+
+            # Update manifest object (for return value)
             manifest.checksum = checksum
 
-            # Update manifest with checksum
-            await save_manifest(manifest.model_dump(), manifest_path)
-
-            # Recreate archive with updated manifest
-            await create_archive(temp_dir, archive_path)
-            archive_size = archive_path.stat().st_size
+            # Save checksum alongside archive (for verification)
+            checksum_path = self.backup_dir / f"{backup_id}.checksum"
+            with open(checksum_path, "w") as f:
+                f.write(checksum)
 
             logger.info(f"Backup complete: {backup_id} ({archive_size:,} bytes)")
 
@@ -169,8 +171,16 @@ class BackupManager:
 
         for archive_path in self.backup_dir.glob("*.ngbak"):
             try:
-                # Extract just the manifest to read metadata
+                # Read checksum from external file (created during backup)
                 backup_id = archive_path.stem
+                checksum_path = self.backup_dir / f"{backup_id}.checksum"
+
+                if checksum_path.exists():
+                    with open(checksum_path, "r") as f:
+                        stored_checksum = f.read().strip()
+                else:
+                    # Fallback: compute checksum if file missing
+                    stored_checksum = compute_checksum(archive_path)
 
                 temp_dir = self.backup_dir / f"read_{backup_id}"
                 temp_dir.mkdir(parents=True, exist_ok=True)
@@ -181,6 +191,9 @@ class BackupManager:
                     manifest_path = temp_dir / "manifest.json"
                     manifest_data = await load_manifest(manifest_path)
                     manifest = BackupManifest(**manifest_data)
+
+                    # Update manifest with actual checksum from file
+                    manifest.checksum = stored_checksum
 
                     backups.append(BackupMetadata(
                         backup_id=manifest.backup_id,
@@ -211,11 +224,17 @@ class BackupManager:
             True if deleted, False if not found
         """
         archive_path = self.backup_dir / f"{backup_id}.ngbak"
+        checksum_path = self.backup_dir / f"{backup_id}.checksum"
 
         if not archive_path.exists():
             return False
 
         archive_path.unlink()
+
+        # Also delete checksum file if it exists
+        if checksum_path.exists():
+            checksum_path.unlink()
+
         logger.info(f"Deleted backup: {backup_id}")
 
         return True
@@ -243,9 +262,23 @@ class BackupManager:
 
     async def _export_vectors(self, output_dir: Path) -> Dict[str, int]:
         """Export vector storage."""
-        exporter = QdrantExporter(self.graphrag.entities_vdb)
-        await exporter.export(output_dir)
-        return await exporter.get_statistics()
+        stats = {}
+
+        # Export entities vector database
+        if self.graphrag.entities_vdb is not None:
+            entities_exporter = QdrantExporter(self.graphrag.entities_vdb)
+            await entities_exporter.export(output_dir)
+            entities_stats = await entities_exporter.get_statistics()
+            stats.update({f"entities_{k}": v for k, v in entities_stats.items()})
+
+        # Export chunks vector database (if naive RAG enabled)
+        if self.graphrag.chunks_vdb is not None:
+            chunks_exporter = QdrantExporter(self.graphrag.chunks_vdb)
+            await chunks_exporter.export(output_dir)
+            chunks_stats = await chunks_exporter.get_statistics()
+            stats.update({f"chunks_{k}": v for k, v in chunks_stats.items()})
+
+        return stats
 
     async def _export_kv(self, output_dir: Path) -> Dict[str, int]:
         """Export key-value storages."""
@@ -269,9 +302,17 @@ class BackupManager:
 
     async def _restore_vectors(self, input_dir: Path) -> None:
         """Restore vector storage."""
-        exporter = QdrantExporter(self.graphrag.entities_vdb)
         snapshot_dir = input_dir / "qdrant"
-        await exporter.restore(snapshot_dir)
+
+        # Restore entities vector database
+        if self.graphrag.entities_vdb is not None:
+            entities_exporter = QdrantExporter(self.graphrag.entities_vdb)
+            await entities_exporter.restore(snapshot_dir)
+
+        # Restore chunks vector database (if naive RAG enabled)
+        if self.graphrag.chunks_vdb is not None:
+            chunks_exporter = QdrantExporter(self.graphrag.chunks_vdb)
+            await chunks_exporter.restore(snapshot_dir)
 
     async def _restore_kv(self, input_dir: Path) -> None:
         """Restore key-value storages."""

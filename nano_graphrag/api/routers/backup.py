@@ -1,6 +1,7 @@
 """Backup and restore API endpoints."""
 
 import os
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 from typing import List
@@ -37,15 +38,20 @@ async def _create_backup_task(
         # Create backup
         metadata = await backup_manager.create_backup()
 
-        # Update job with metadata
-        await job_manager.update_job_status(job_id, JobStatus.COMPLETED)
-
         # Store backup metadata in job
         job = await job_manager.get_job(job_id)
         if job:
             job.metadata["backup_id"] = metadata.backup_id
             job.metadata["size_bytes"] = metadata.size_bytes
-            await job_manager._update_job(job)
+            job.status = JobStatus.COMPLETED
+            job.completed_at = datetime.now(timezone.utc)
+
+            if job_manager.redis:
+                await job_manager.redis.setex(
+                    f"job:{job_id}",
+                    job_manager.job_ttl,
+                    job.model_dump_json()
+                )
 
         logger.info(f"Backup job {job_id} completed: {metadata.backup_id}")
 

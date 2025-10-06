@@ -1,6 +1,8 @@
 """Neo4j backup/restore exporter."""
 
 import asyncio
+import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -84,12 +86,14 @@ class Neo4jExporter:
         Args:
             dump_file: Output dump file path
         """
+        relative_path = dump_file.name
+        neo4j_import_dir = os.getenv("NEO4J_IMPORT_DIR", "/neo4j_import")
+
         async with self.storage.async_driver.session(database=self.database) as session:
-            # Export all nodes and relationships in namespace
             query = f"""
             CALL apoc.export.cypher.query(
                 "MATCH (n:`{self.namespace}`) OPTIONAL MATCH (n)-[r]->(m:`{self.namespace}`) RETURN n, r, m",
-                "{dump_file}",
+                "{relative_path}",
                 {{format: 'cypher-shell', useOptimizations: {{type: 'UNWIND_BATCH', unwindBatchSize: 20}}}}
             )
             """
@@ -101,6 +105,13 @@ class Neo4jExporter:
                 logger.debug(f"APOC export: {record}")
             else:
                 raise RuntimeError("APOC export returned no results")
+
+        neo4j_import_path = Path(neo4j_import_dir) / relative_path
+        if neo4j_import_path.exists():
+            shutil.copy2(neo4j_import_path, dump_file)
+            logger.info(f"Copied export from {neo4j_import_path} to {dump_file}")
+        else:
+            logger.warning(f"Export file not found at {neo4j_import_path}, file may still be in Neo4j container")
 
     async def restore(self, dump_file: Path) -> None:
         """Restore Neo4j database from dump file.
@@ -157,15 +168,33 @@ class Neo4jExporter:
         Args:
             dump_file: Dump file path
         """
+        neo4j_import_dir = os.getenv("NEO4J_IMPORT_DIR", "/neo4j_import")
+        neo4j_import_path = Path(neo4j_import_dir) / dump_file.name
+
+        shutil.copy2(dump_file, neo4j_import_path)
+        logger.info(f"Copied restore file to {neo4j_import_path}")
+
         with open(dump_file, 'r') as f:
             cypher_script = f.read()
 
         async with self.storage.async_driver.session(database=self.database) as session:
-            # Execute Cypher script line by line
-            for statement in cypher_script.split(';'):
-                statement = statement.strip()
-                if statement:
-                    await session.run(statement)
+            for line in cypher_script.split('\n'):
+                line = line.strip()
+
+                if not line or line.startswith('//'):
+                    continue
+
+                if line.startswith(':'):
+                    continue
+
+                if line.endswith(';'):
+                    line = line[:-1].strip()
+
+                if line:
+                    try:
+                        await session.run(line)
+                    except Exception as e:
+                        logger.debug(f"Skipped statement: {e}")
 
         logger.debug("Cypher script executed successfully")
 

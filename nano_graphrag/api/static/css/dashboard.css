@@ -579,6 +579,140 @@ tr:hover {
     font-size: 14px;
 }
 
+/* Backups Tab Styles */
+.backup-container {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 20px;
+}
+
+.backup-section {
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #30363d;
+}
+
+.backup-section:last-child {
+    border-bottom: none;
+}
+
+.backup-section h3 {
+    color: #58a6ff;
+    font-size: 16px;
+    margin-bottom: 15px;
+}
+
+.action-button,
+.refresh-button {
+    background: #238636;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-right: 10px;
+}
+
+.action-button:hover:not(:disabled),
+.refresh-button:hover {
+    background: #2ea043;
+}
+
+.action-button:disabled {
+    background: #30363d;
+    color: #8b949e;
+    cursor: not-allowed;
+}
+
+.status-message {
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.status-message.info {
+    background: rgba(88, 166, 255, 0.1);
+    color: #58a6ff;
+    border: 1px solid #1f6feb;
+}
+
+.status-message.success {
+    background: rgba(46, 160, 67, 0.1);
+    color: #3fb950;
+    border: 1px solid #238636;
+}
+
+.status-message.error {
+    background: rgba(248, 81, 73, 0.1);
+    color: #f85149;
+    border: 1px solid #da3633;
+}
+
+#backupFileInput {
+    padding: 8px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    display: block;
+}
+
+#backupsTable {
+    width: 100%;
+    margin-top: 15px;
+    border-collapse: collapse;
+    background: #0d1117;
+}
+
+#backupsTable thead {
+    background: #161b22;
+}
+
+#backupsTable th {
+    padding: 12px;
+    text-align: left;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    font-weight: 600;
+}
+
+#backupsTable td {
+    padding: 12px;
+    border: 1px solid #30363d;
+}
+
+.download-btn,
+.delete-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    margin-right: 5px;
+}
+
+.download-btn {
+    background: #238636;
+    color: white;
+}
+
+.download-btn:hover {
+    background: #2ea043;
+}
+
+.delete-btn {
+    background: #da3633;
+    color: white;
+}
+
+.delete-btn:hover {
+    background: #f85149;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .tab-nav {

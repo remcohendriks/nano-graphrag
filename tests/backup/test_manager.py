@@ -23,6 +23,7 @@ class MockGraphRAG:
     def __init__(self):
         self.chunk_entity_relation_graph = MockStorage("neo4j")
         self.entities_vdb = MockStorage("qdrant")
+        self.chunks_vdb = None  # Default: naive RAG disabled
         self.full_docs = MockStorage("json")
         self.text_chunks = MockStorage("json")
         self.community_reports = MockStorage("json")

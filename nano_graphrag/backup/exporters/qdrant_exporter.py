@@ -1,5 +1,6 @@
 """Qdrant vector database backup/restore exporter."""
 
+import httpx
 import shutil
 from pathlib import Path
 from typing import Dict, Any
@@ -33,7 +34,6 @@ class QdrantExporter:
 
         client = await self.storage._get_client()
 
-        # Create collection snapshot
         logger.info(f"Creating Qdrant snapshot for collection: {self.collection_name}")
         snapshot_description = await client.create_snapshot(
             collection_name=self.collection_name
@@ -42,19 +42,20 @@ class QdrantExporter:
         snapshot_name = snapshot_description.name
         logger.debug(f"Snapshot created: {snapshot_name}")
 
-        # Download snapshot to output directory
-        snapshot_data = await client.download_snapshot(
-            collection_name=self.collection_name,
-            snapshot_name=snapshot_name
-        )
+        qdrant_url = getattr(self.storage, "_url", "http://localhost:6333")
+        download_url = f"{qdrant_url}/collections/{self.collection_name}/snapshots/{snapshot_name}"
 
         snapshot_file = snapshot_dir / f"{self.collection_name}.snapshot"
-        with open(snapshot_file, "wb") as f:
-            f.write(snapshot_data)
+
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.get(download_url, timeout=300.0)
+            response.raise_for_status()
+
+            with open(snapshot_file, "wb") as f:
+                f.write(response.content)
 
         logger.info(f"Qdrant snapshot saved: {snapshot_file}")
 
-        # Clean up server-side snapshot
         try:
             await client.delete_snapshot(
                 collection_name=self.collection_name,
@@ -78,39 +79,28 @@ class QdrantExporter:
             raise FileNotFoundError(f"Snapshot file not found: {snapshot_file}")
 
         client = await self.storage._get_client()
+        logger.info(f"Restoring Qdrant collection from snapshot: {self.collection_name}")
 
-        # Read snapshot data
-        with open(snapshot_file, "rb") as f:
-            snapshot_data = f.read()
-
-        # Upload snapshot to Qdrant server
-        logger.info(f"Uploading snapshot for collection: {self.collection_name}")
-
-        # Delete existing collection if it exists
         try:
             await client.delete_collection(collection_name=self.collection_name)
             logger.debug(f"Deleted existing collection: {self.collection_name}")
         except Exception as e:
             logger.debug(f"No existing collection to delete: {e}")
 
-        # Recover collection from snapshot
-        # Note: Qdrant's snapshot upload API may vary by version
-        # This assumes snapshot can be used to recreate the collection
-        try:
-            # Upload snapshot (API endpoint may vary)
-            await client.upload_snapshot(
-                collection_name=self.collection_name,
-                snapshot=snapshot_data
-            )
-            logger.info(f"Qdrant collection restored from snapshot: {self.collection_name}")
-        except AttributeError:
-            # Fallback: use recover method if upload_snapshot not available
-            logger.warning("upload_snapshot not available, using alternative restore method")
-            # This may require manual intervention or different Qdrant version
-            raise NotImplementedError(
-                "Qdrant snapshot restore not fully supported in this client version. "
-                "Please restore manually using Qdrant admin tools."
-            )
+        qdrant_url = getattr(self.storage, "_url", "http://localhost:6333")
+        upload_url = f"{qdrant_url}/collections/{self.collection_name}/snapshots/upload?priority=snapshot"
+
+        async with httpx.AsyncClient() as http_client:
+            with open(snapshot_file, "rb") as f:
+                files = {"snapshot": (snapshot_file.name, f, "application/octet-stream")}
+                response = await http_client.post(
+                    upload_url,
+                    files=files,
+                    timeout=300.0
+                )
+                response.raise_for_status()
+
+        logger.info(f"Qdrant collection restored: {self.collection_name}")
 
     async def get_statistics(self) -> Dict[str, int]:
         """Get Qdrant collection statistics.

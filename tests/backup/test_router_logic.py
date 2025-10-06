@@ -159,6 +159,7 @@ async def test_backup_manager_restore_workflow():
         mock_graphrag = MagicMock()
         mock_graphrag.chunk_entity_relation_graph = MagicMock()
         mock_graphrag.entities_vdb = MagicMock()
+        mock_graphrag.chunks_vdb = MagicMock()  # Naive RAG enabled
         mock_graphrag.full_docs = MagicMock()
         mock_graphrag.text_chunks = MagicMock()
         mock_graphrag.community_reports = MagicMock()
@@ -192,5 +193,6 @@ async def test_backup_manager_restore_workflow():
 
                             # Verify restore was called
                             mock_neo4j.return_value.restore.assert_called_once()
-                            mock_qdrant.return_value.restore.assert_called_once()
+                            # QdrantExporter called twice: entities_vdb + chunks_vdb
+                            assert mock_qdrant.return_value.restore.call_count == 2
                             mock_kv.return_value.restore.assert_called_once()

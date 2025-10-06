@@ -18,6 +18,10 @@ document.addEventListener('DOMContentLoaded', () => {
         window.Jobs.init();
     }
 
+    if (window.Backups) {
+        window.Backups.init();
+    }
+
     // Log successful initialization
     console.log('nano-graphrag dashboard initialized');
 });
