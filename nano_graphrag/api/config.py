@@ -1,7 +1,7 @@
 """Configuration for FastAPI application."""
 
 from pydantic_settings import BaseSettings
-from pydantic import validator
+from pydantic import validator, Field
 from typing import List, Optional, Union
 import json
 
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # Performance
     max_query_timeout: int = 300  # 5 minutes
     max_concurrent_inserts: int = 10
-    max_batch_size: int = 100
+    max_batch_size: int = Field(default=100, description="Maximum number of documents per batch upload")
 
     # Backend URLs
     neo4j_url: Optional[str] = None

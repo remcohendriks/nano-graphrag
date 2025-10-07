@@ -1,6 +1,6 @@
 """Pydantic models for API requests and responses."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from datetime import datetime
@@ -19,7 +19,15 @@ class DocumentInsert(BaseModel):
 
 
 class BatchDocumentInsert(BaseModel):
-    documents: List[DocumentInsert] = Field(..., min_length=1, max_length=100)
+    documents: List[DocumentInsert] = Field(..., min_length=1)
+
+    @field_validator('documents')
+    @classmethod
+    def validate_batch_size(cls, v):
+        from .config import settings
+        if len(v) > settings.max_batch_size:
+            raise ValueError(f"Batch size {len(v)} exceeds maximum allowed size of {settings.max_batch_size}")
+        return v
 
 
 class QueryRequest(BaseModel):
