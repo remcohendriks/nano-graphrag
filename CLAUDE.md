@@ -79,7 +79,24 @@ The system supports multiple LLM providers with hot-swappable configurations:
 
 ### Vector Storage Systems
 
-#### 1. HNSWVectorStorage (Hierarchical Navigable Small World)
+#### 1. QdrantVectorStorage (Production-Grade, First-Class)
+- **Library**: qdrant-client
+- **Location**: `nano_graphrag/_storage/vdb_qdrant.py`
+- **Status**: **First-class citizen** with full backup/restore support
+- **Key Features**:
+  - Production-grade vector search
+  - Distributed and scalable
+  - HTTP REST API support
+  - API key authentication
+  - Snapshot-based backup/restore
+- **Configuration**:
+  ```python
+  url: "http://localhost:6333"
+  api_key: Optional[str]  # For authenticated instances
+  collection_name: str
+  ```
+
+#### 2. HNSWVectorStorage (Hierarchical Navigable Small World)
 - **Library**: hnswlib
 - **Location**: `nano_graphrag/_storage/vdb_hnswlib.py`
 - **Key Features**:
@@ -96,7 +113,7 @@ The system supports multiple LLM providers with hot-swappable configurations:
   num_threads: -1       # Use all CPU cores
   ```
 
-#### 2. NanoVectorDBStorage (Default)
+#### 3. NanoVectorDBStorage (Default)
 - **Library**: nano-vectordb
 - **Location**: `nano_graphrag/_storage/vdb_nanovectordb.py`
 - **Features**:
@@ -104,14 +121,31 @@ The system supports multiple LLM providers with hot-swappable configurations:
   - Exact nearest neighbor search
   - JSON-based persistence
 
-#### 3. Additional Vector DB Support
+#### 4. Additional Vector DB Support
 - **Milvus**: Via examples
 - **FAISS**: Via examples
-- **Qdrant**: Via examples (in fresh fork)
 
 ### Graph Storage Systems
 
-#### 1. NetworkXStorage (Default)
+#### 1. Neo4jStorage (Production-Grade, First-Class)
+- **Library**: neo4j-python-driver
+- **Location**: `nano_graphrag/_storage/gdb_neo4j.py`
+- **Status**: **First-class citizen** with full backup/restore support
+- **Key Features**:
+  - Production-grade graph database
+  - Cypher query language support
+  - APOC export/import via shared Docker volumes
+  - Scalable and persistent
+  - Batch transaction support (connection pool optimization)
+- **Configuration**:
+  ```python
+  url: "neo4j://localhost:7687"
+  user: "neo4j"
+  password: str
+  database: "neo4j"
+  ```
+
+#### 2. NetworkXStorage (Default)
 - **Library**: NetworkX
 - **Location**: `nano_graphrag/_storage/gdb_networkx.py`
 - **Features**:
@@ -120,24 +154,37 @@ The system supports multiple LLM providers with hot-swappable configurations:
   - Rich graph algorithms via NetworkX
   - Community detection (Leiden algorithm)
 
-#### 2. Neo4jStorage
-- **Library**: neo4j-python-driver
-- **Location**: `nano_graphrag/_storage/gdb_neo4j.py`
-- **Features**:
-  - Production-grade graph database
-  - Cypher query support
-  - Scalable and persistent
-
 ### Key-Value Storage
 
-#### JsonKVStorage (Default)
-- **Location**: `nano_graphrag/_storage/kv_json.py`
-- **Purpose**: Store documents, chunks, reports, and cache
+#### 1. RedisKVStorage (Production-Grade, First-Class)
+- **Library**: redis (async)
+- **Location**: `nano_graphrag/_storage/kv_redis.py`
+- **Status**: **First-class citizen** with full backup/restore support
+- **Key Features**:
+  - Production-grade key-value store
+  - Async operations
+  - Namespace-based organization
+  - TTL support per namespace
+  - JSON serialization with proper encoding
 - **Namespaces**:
   - `full_docs`: Complete documents
   - `text_chunks`: Chunked text segments
   - `community_reports`: Graph community summaries
   - `llm_response_cache`: Cached LLM responses
+- **Configuration**:
+  ```python
+  url: "redis://localhost:6379"
+  namespace: str
+  global_config: dict  # TTL configuration per namespace
+  ```
+
+#### 2. JsonKVStorage (Default)
+- **Location**: `nano_graphrag/_storage/kv_json.py`
+- **Purpose**: Store documents, chunks, reports, and cache
+- **Features**:
+  - File-based JSON storage
+  - Simple and portable
+  - No external dependencies
 
 ## Entity Extraction
 
@@ -174,6 +221,168 @@ The system supports multiple LLM providers with hot-swappable configurations:
 - Simple vector similarity search
 - No graph structure utilization
 - Fallback option
+
+## Backup & Restore System (NGRAF-023)
+
+### Overview
+Production-ready unified backup/restore system for all GraphRAG storage backends with robust integrity validation.
+
+**Status**: Production-ready (Expert-cleared after 6 rounds of code review)
+**Location**: `nano_graphrag/backup/`
+**API**: `nano_graphrag/api/routers/backup.py`
+
+### Features
+
+#### Complete Storage Backend Coverage
+- **Neo4j**: Cypher export/import via APOC with shared Docker volumes
+- **Qdrant**: Snapshot API with HTTP REST and authentication support
+- **Redis KV**: All namespaces (docs, chunks, reports, cache)
+
+#### Archive Format
+- **Extension**: `.ngbak` (tar.gz)
+- **Contents**:
+  - `neo4j/` - Cypher dump files
+  - `qdrant/` - Vector collection snapshots
+  - `kv/` - JSON exports per namespace
+  - `config/` - GraphRAG configuration
+  - `manifest.json` - Metadata, statistics, and checksum
+
+#### Integrity Validation
+- **Checksum Strategy**: SHA-256 hash of payload directory contents
+- **Implementation**: Excludes checksum field from manifest during hashing to avoid circular dependency
+- **Verification**: Symmetric logic in backup and restore
+- **Files**: External `.checksum` file + embedded in manifest
+- **Self-Validating**: Archives contain complete integrity information
+
+#### Dashboard UI
+- Create backups with one click (background jobs)
+- List all available backups with auto-refresh
+- Download backups (.ngbak files)
+- Upload and restore from file
+- Delete backups with confirmation
+- **Location**: `nano_graphrag/api/templates/dashboard.html` (Backups tab)
+
+### API Endpoints
+
+```python
+POST   /api/v1/backup              # Create backup (background job)
+GET    /api/v1/backup              # List all backups
+POST   /api/v1/backup/restore      # Restore from uploaded file
+GET    /api/v1/backup/{id}/download  # Download .ngbak archive
+DELETE /api/v1/backup/{id}         # Delete backup
+```
+
+### Usage Example
+
+```python
+from nano_graphrag.backup import BackupManager
+from nano_graphrag import GraphRAG
+
+# Initialize
+graphrag = GraphRAG(
+    working_dir="./nano_graphrag_cache",
+    # ... storage backends configuration ...
+)
+backup_manager = BackupManager(graphrag, backup_dir="./backups")
+
+# Create backup
+metadata = await backup_manager.create_backup()
+print(f"Backup created: {metadata.backup_id}")
+print(f"Size: {metadata.size_bytes} bytes")
+
+# List backups
+backups = await backup_manager.list_backups()
+for backup in backups:
+    print(f"{backup.backup_id}: {backup.created_at}")
+
+# Restore backup
+await backup_manager.restore_backup(backup_id="snapshot_2025-10-06T12-00-00Z")
+```
+
+### Docker Configuration
+
+**Shared Volume for Neo4j APOC** (`docker-compose-api.yml`):
+```yaml
+volumes:
+  neo4j_import:  # Shared between API and Neo4j containers
+
+services:
+  api:
+    volumes:
+      - neo4j_import:/neo4j_import
+    environment:
+      NEO4J_IMPORT_DIR: /neo4j_import
+
+  neo4j:
+    volumes:
+      - neo4j_import:/var/lib/neo4j/import
+```
+
+### Performance
+
+**Backup** (23MB dataset):
+- Neo4j export: ~2s
+- Qdrant download: ~0.2s
+- Redis export: ~0.5s
+- Archive creation: ~1s
+- **Total: ~4s**
+
+**Restore** (23MB dataset):
+- Archive extraction: ~1s
+- Neo4j restore: ~8s
+- Qdrant upload: ~0.3s
+- Redis restore: ~0.5s
+- **Total: ~10s**
+
+### Architecture Details
+
+**Exporters** (`nano_graphrag/backup/exporters/`):
+- `Neo4jExporter`: APOC Cypher export with shared volume coordination
+- `QdrantExporter`: HTTP REST API for snapshot download/upload with auth
+- `KVExporter`: JSON export with proper serialization (Redis/JSON agnostic)
+
+**Manager** (`nano_graphrag/backup/manager.py`):
+- Orchestrates backup/restore across all backends
+- Handles manifest creation with payload checksum
+- Archive creation and extraction
+- Integrity verification
+
+**Models** (`nano_graphrag/backup/models.py`):
+- `BackupManifest`: Metadata, statistics, checksum
+- `BackupMetadata`: API response format
+
+**Utils** (`nano_graphrag/backup/utils.py`):
+- `compute_directory_checksum()`: Deterministic payload hashing
+- `create_archive()`, `extract_archive()`: Tar.gz operations
+- `save_manifest()`, `load_manifest()`: JSON serialization
+
+### Implementation Journey
+
+This system underwent **6 rounds of expert code review** resolving:
+- Round 1: Initial implementation
+- Round 2: Checksum bugs, Qdrant API, chunks VDB, Dashboard UI (4 issues)
+- Round 3: Runtime integration (9 issues)
+- Round 4: Qdrant authentication, manifest checksum attempt (2 issues)
+- Round 5: Checksum self-reference paradox fix
+- Round 6: Manifest timing bug fix → **Expert cleared**
+
+**Final Status**: All critical issues resolved, production-ready
+
+### Testing
+
+**Test Coverage**: 15 tests passing
+- `tests/backup/test_manager.py`: Core backup/restore logic (6 tests)
+- `tests/backup/test_router_logic.py`: API integration (5 tests)
+- `tests/backup/test_utils.py`: Utility functions (4 tests)
+- **Regression test included**: Validates checksum timing (CODEX-012)
+
+### Security Considerations
+
+- ✅ API key authentication for Qdrant
+- ✅ XSS protection in dashboard UI
+- ✅ File validation (.ngbak extension)
+- ✅ Checksum integrity verification
+- ✅ No credentials stored in backup manifest
 
 ## Tokenization Support
 
