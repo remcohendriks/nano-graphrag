@@ -1,17 +1,19 @@
-"""Neo4j backup/restore exporter."""
+"""Neo4j backup/restore exporter using APOC Core procedures."""
 
-import asyncio
 import os
 import shutil
-import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict
 
 from ..._utils import logger
 
 
 class Neo4jExporter:
-    """Export and restore Neo4j graph database."""
+    """Export and restore Neo4j graph database using APOC Core procedures.
+
+    Uses apoc.export.cypher.query for export and apoc.cypher.runMany for restore.
+    Both procedures are available in APOC Core (no Extended edition required).
+    """
 
     def __init__(self, storage: Any):
         """Initialize exporter with Neo4j storage backend.
@@ -24,9 +26,7 @@ class Neo4jExporter:
         self.namespace = storage.namespace
 
     async def export(self, output_dir: Path) -> Path:
-        """Export Neo4j database to dump file.
-
-        Uses neo4j-admin dump command if available, otherwise falls back to Cypher export.
+        """Export Neo4j database to Cypher dump file using APOC.
 
         Args:
             output_dir: Directory to write export file
@@ -37,51 +37,13 @@ class Neo4jExporter:
         output_dir.mkdir(parents=True, exist_ok=True)
         dump_file = output_dir / "neo4j.dump"
 
-        try:
-            # Try neo4j-admin dump (preferred method)
-            await self._export_with_admin(dump_file)
-        except Exception as e:
-            logger.warning(f"neo4j-admin dump failed: {e}, falling back to Cypher export")
-            await self._export_with_cypher(dump_file)
+        await self._export_with_apoc(dump_file)
 
         logger.info(f"Neo4j export complete: {dump_file}")
         return dump_file
 
-    async def _export_with_admin(self, dump_file: Path) -> None:
-        """Export using neo4j-admin database dump command.
-
-        Args:
-            dump_file: Output dump file path
-        """
-        # neo4j-admin database dump requires stopping the database
-        # For production, we use --to-path to export without stopping
-        cmd = [
-            "neo4j-admin",
-            "database",
-            "dump",
-            self.database,
-            f"--to-path={dump_file.parent}",
-            "--overwrite-destination=true"
-        ]
-
-        logger.info(f"Running: {' '.join(cmd)}")
-
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            error_msg = stderr.decode() if stderr else "Unknown error"
-            raise RuntimeError(f"neo4j-admin dump failed: {error_msg}")
-
-        logger.debug(f"neo4j-admin output: {stdout.decode()}")
-
-    async def _export_with_cypher(self, dump_file: Path) -> None:
-        """Export using Cypher APOC export (fallback method).
+    async def _export_with_apoc(self, dump_file: Path) -> None:
+        """Export using APOC apoc.export.cypher.query procedure.
 
         Args:
             dump_file: Output dump file path
@@ -90,6 +52,7 @@ class Neo4jExporter:
         neo4j_import_dir = os.getenv("NEO4J_IMPORT_DIR", "/neo4j_import")
 
         async with self.storage.async_driver.session(database=self.database) as session:
+            # Export all nodes and relationships with the namespace label
             query = f"""
             CALL apoc.export.cypher.query(
                 "MATCH (n:`{self.namespace}`) OPTIONAL MATCH (n)-[r]->(m:`{self.namespace}`) RETURN n, r, m",
@@ -102,19 +65,23 @@ class Neo4jExporter:
             record = await result.single()
 
             if record:
-                logger.debug(f"APOC export: {record}")
+                logger.debug(f"APOC export result: {record}")
             else:
                 raise RuntimeError("APOC export returned no results")
 
+        # Copy export file from Neo4j import directory to output directory
         neo4j_import_path = Path(neo4j_import_dir) / relative_path
         if neo4j_import_path.exists():
             shutil.copy2(neo4j_import_path, dump_file)
             logger.info(f"Copied export from {neo4j_import_path} to {dump_file}")
         else:
-            logger.warning(f"Export file not found at {neo4j_import_path}, file may still be in Neo4j container")
+            logger.warning(
+                f"Export file not found at {neo4j_import_path}, "
+                "file may still be in Neo4j container"
+            )
 
     async def restore(self, dump_file: Path) -> None:
-        """Restore Neo4j database from dump file.
+        """Restore Neo4j database from dump file using APOC.
 
         Args:
             dump_file: Path to dump file
@@ -122,81 +89,54 @@ class Neo4jExporter:
         if not dump_file.exists():
             raise FileNotFoundError(f"Dump file not found: {dump_file}")
 
-        try:
-            # Try neo4j-admin load
-            await self._restore_with_admin(dump_file)
-        except Exception as e:
-            logger.warning(f"neo4j-admin load failed: {e}, falling back to Cypher restore")
-            await self._restore_with_cypher(dump_file)
+        await self._restore_with_apoc(dump_file)
 
         logger.info(f"Neo4j restore complete from: {dump_file}")
 
-    async def _restore_with_admin(self, dump_file: Path) -> None:
-        """Restore using neo4j-admin database load command.
+    async def _restore_with_apoc(self, dump_file: Path) -> None:
+        """Restore using APOC apoc.cypher.runMany procedure.
+
+        Reads the Cypher dump file and executes it using apoc.cypher.runMany
+        which handles multiple statements separated by semicolons.
 
         Args:
             dump_file: Dump file path
         """
-        cmd = [
-            "neo4j-admin",
-            "database",
-            "load",
-            self.database,
-            f"--from-path={dump_file.parent}",
-            "--overwrite-destination=true"
-        ]
-
-        logger.info(f"Running: {' '.join(cmd)}")
-
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            error_msg = stderr.decode() if stderr else "Unknown error"
-            raise RuntimeError(f"neo4j-admin load failed: {error_msg}")
-
-        logger.debug(f"neo4j-admin output: {stdout.decode()}")
-
-    async def _restore_with_cypher(self, dump_file: Path) -> None:
-        """Restore using Cypher script execution (fallback method).
-
-        Args:
-            dump_file: Dump file path
-        """
-        neo4j_import_dir = os.getenv("NEO4J_IMPORT_DIR", "/neo4j_import")
-        neo4j_import_path = Path(neo4j_import_dir) / dump_file.name
-
-        shutil.copy2(dump_file, neo4j_import_path)
-        logger.info(f"Copied restore file to {neo4j_import_path}")
-
-        with open(dump_file, 'r') as f:
+        # Read the Cypher script
+        with open(dump_file, 'r', encoding='utf-8') as f:
             cypher_script = f.read()
 
+        # Clean the script: remove cypher-shell specific commands
+        cleaned_statements = []
+        for line in cypher_script.split('\n'):
+            line = line.strip()
+            # Skip empty lines, comments, and shell commands
+            if not line or line.startswith('//') or line.startswith(':'):
+                continue
+            cleaned_statements.append(line)
+
+        # Rejoin into single script
+        cleaned_script = '\n'.join(cleaned_statements)
+
+        logger.info(
+            f"Restoring Neo4j database with {len(cleaned_script)} characters of Cypher"
+        )
+
+        # Execute using apoc.cypher.runMany
         async with self.storage.async_driver.session(database=self.database) as session:
-            for line in cypher_script.split('\n'):
-                line = line.strip()
+            result = await session.run(
+                "CALL apoc.cypher.runMany($cypher, {})",
+                cypher=cleaned_script
+            )
 
-                if not line or line.startswith('//'):
-                    continue
+            # Consume all results to ensure execution completes
+            records = []
+            async for record in result:
+                records.append(record)
 
-                if line.startswith(':'):
-                    continue
-
-                if line.endswith(';'):
-                    line = line[:-1].strip()
-
-                if line:
-                    try:
-                        await session.run(line)
-                    except Exception as e:
-                        logger.debug(f"Skipped statement: {e}")
-
-        logger.debug("Cypher script executed successfully")
+            logger.info(
+                f"Successfully executed restore with {len(records)} result records"
+            )
 
     async def get_statistics(self) -> Dict[str, int]:
         """Get Neo4j database statistics.
